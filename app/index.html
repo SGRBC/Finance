@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles.css">
   <title>SGRBC Finance Tracker</title>
 </head>
-<body>
+<body class="locked">
   <header class="topbar">
     <div class="brand">
       <img src="icons/logo.png" class="logo" alt="SGRBC logo" width="36" height="36">
@@ -24,6 +24,7 @@
     <span id="who" class="who" hidden></span>
     <button id="menuBtn" class="icon-btn" aria-label="Menu" aria-haspopup="true">&#8942;</button>
     <div id="menu" class="menu" hidden>
+      <button id="menuInstall" hidden>Install app</button>
       <button id="menuSignIn" hidden>Sign in with Google</button>
       <button id="menuSignOut" hidden>Sign out</button>
       <button id="menuRefresh" hidden>Refresh from Google Drive</button>
@@ -46,7 +47,10 @@
     <section class="filters" aria-label="Filters">
       <select id="fMonth" aria-label="Month"></select>
       <select id="fCategory" aria-label="Category"></select>
-      <input id="fSearch" type="search" placeholder="Search description" aria-label="Search">
+      <div class="search-wrap">
+        <input id="fSearch" type="search" placeholder="Search description" aria-label="Search">
+        <button type="button" id="fSearchClear" class="search-clear" aria-label="Clear search" hidden>&times;</button>
+      </div>
       <div class="seg" role="group" aria-label="Type">
         <button data-type="" class="active">All</button>
         <button data-type="Credit">Credit</button>
@@ -126,6 +130,16 @@
     </form>
   </dialog>
 
+  <dialog id="installDlg">
+    <h2>Install SGRBC Finance</h2>
+    <p id="installIntro" class="hint"></p>
+    <ol id="installSteps" class="install-steps"></ol>
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" id="installClose" class="primary">Got it</button>
+    </div>
+  </dialog>
+
   <dialog id="linkDlg">
     <form id="linkForm" autocomplete="off">
       <h2>Use existing Google Drive file</h2>
@@ -155,7 +169,7 @@
 
   <dialog id="shareDlg">
     <h2>Share &amp; access</h2>
-    <p class="hint">Editors can add, change and delete entries. Viewers can only look. Google Drive enforces this.</p>
+    <p class="hint">Only the people listed here can open this data, after signing in with their Google account. Editors can add, change and delete entries; viewers can only look. Google Drive enforces this.</p>
     <div id="permList" class="perm-list"></div>
     <form id="shareForm" autocomplete="off">
       <label>Google account email
@@ -169,7 +183,7 @@
       </label>
       <p id="shareError" class="error" role="alert" hidden></p>
       <div class="actions">
-        <button type="button" id="shareLinkBtn">Allow anyone with the link to view (no sign-in)</button>
+        <button type="button" id="shareLinkBtn" hidden>Remove “anyone with the link” access</button>
       </div>
       <div class="actions">
         <span class="spacer"></span>

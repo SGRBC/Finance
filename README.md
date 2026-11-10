@@ -26,8 +26,8 @@ The data file lives in the **owner's** Google Drive and is shared with Google's 
 |--------|------------------|-----------|
 | Owner | Owner | Edits, and can manage who has access (⋮ → *Share & access*) |
 | Editor | Editor | Signs in with Google, can add / change / delete |
-| Viewer | Viewer | Signs in (or uses a view-only link), can only look |
-| Anyone with the link (optional) | Viewer | Can view without signing in |
+| Viewer | Viewer | Signs in, can only look |
+| Anyone else | none | Sees nothing: no data is loaded until a listed account signs in |
 
 Enforcement is done by **Google Drive**, not by the page: every save is an authenticated write to the Drive file, and Google rejects it unless that account has Editor rights. Editing the page's code in a browser cannot grant write access. The app also hides the add/edit buttons for viewers. The app only requests the narrow `drive.file` permission, so it can never see the rest of anyone's Drive.
 
@@ -41,14 +41,14 @@ Enforcement is done by **Google Drive**, not by the page: every save is an authe
 7. Edit `app/config.js` and fill in `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`, `GOOGLE_APP_ID`.
 8. Host the `app/` folder on any **HTTPS** static host (GitHub Pages, Netlify, Cloudflare Pages, internal server).
 9. Open the app, ⋮ → *Sign in with Google*, then click **Paste shared file link** and paste the Drive link of the existing shared data file (`SGRBC Finance Data.json`). The app no longer creates data files; all changes go only to that shared file.
-10. ⋮ → **Share & access…** → add people by Google email as **Viewer** or **Editor**, or switch on *anyone with the link can view*.
+10. ⋮ → **Share & access…** → add people by Google email as **Viewer** or **Editor**. Do not turn on "anyone with the link": the app never loads data without a sign-in, and removes that option from the sharing list.
 11. ⋮ → **Copy link for other devices** and send it. Optional: put the file ID in `DRIVE_FILE_ID` in `config.js` so every device uses the file automatically.
 
 The client ID, API key and project number are *public by design* (they identify the app, they are not passwords), which is why the restrictions in steps 4–5 matter. Never put a client **secret** in this app; none is needed.
 
 ### First time on another device / for another person
-- Open the shared link. If the file is shared by link, it loads immediately in view-only mode.
-- To edit: ⋮ → *Sign in with Google* with the account you were made Editor for. Because the app only has `drive.file` access, Google asks you to **confirm the file once** (a Google file-picker opens: choose *SGRBC Finance Data.json*). After that it works on every device you sign in on.
+- Open the shared link and sign in with Google. Nothing is shown until you sign in, and only accounts listed on the file as Viewer or Editor can see the data.
+- Use the account you were made Viewer or Editor for. Because the app only has `drive.file` access, Google asks you to **confirm the file once** (a Google file-picker opens: choose *SGRBC Finance Data.json*). After that it works on every device you sign in on.
 
 ## Try it on your computer
 ```

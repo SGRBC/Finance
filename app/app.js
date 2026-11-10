@@ -9,6 +9,7 @@
   const CACHE_KEY = "sgrbc-finance-cache-v1";    // last copy downloaded from Google Drive (for fast/offline viewing)
   const FILE_KEY = "sgrbc-finance-file-id";
   const PAGE = 50;
+  const DEBIT_CATEGORIES = ["Pastoral Colabor", "Benevolence", "Utilities", "Recurring", "Special"];
   const MAX_BYTES = 20 * 1024 * 1024;
   const MAX_ATTACH = 150000;                      // max length of one stored attachment (data URL characters, ~110 KB)
   const MAX_PHOTO_FILE = 25 * 1024 * 1024;        // largest original image we will try to read
@@ -19,7 +20,11 @@
   const validEmail = (s) => typeof s === "string" && s.length <= 254 && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(s);
 
   let state = { categories: { Credit: [], Debit: [] }, transactions: [] };
-  let filters = { month: "", category: "", search: "", type: "" };
+  const currentMonth = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  let filters = { month: currentMonth(), category: "", search: "", type: "" };   // current month is the default view
   let shown = PAGE;
   let editingId = null;
   let formType = "Credit";
@@ -78,10 +83,10 @@
 
   const sanitize = (data) => {
     if (!data || typeof data !== "object" || !Array.isArray(data.transactions)) throw new Error("bad format");
-    const cats = { Credit: [], Debit: [] };
-    for (const k of ["Credit", "Debit"]) {
-      const src = data.categories && Array.isArray(data.categories[k]) ? data.categories[k] : [];
-      for (const c of src) if (typeof c === "string" && c && c.length <= 60 && !cats[k].includes(c)) cats[k].push(c);
+    const cats = { Credit: [], Debit: DEBIT_CATEGORIES.slice() };
+    {
+      const src = data.categories && Array.isArray(data.categories.Credit) ? data.categories.Credit : [];
+      for (const c of src) if (typeof c === "string" && c && c.length <= 60 && !cats.Credit.includes(c)) cats.Credit.push(c);
     }
     const seen = new Set();
     const txs = [];
@@ -98,9 +103,9 @@
   };
 
   // ---------- local storage ----------
-  const storeKey = () => (driveMode ? CACHE_KEY : LOCAL_KEY);
   const saveLocal = () => {
-    try { localStorage.setItem(storeKey(), JSON.stringify(state)); }
+    if (driveMode) return;   // Drive mode never stores the shared data on the device
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(state)); }
     catch { toast("Could not save on this device: browser storage is full or blocked."); }
   };
   const readLocal = (key) => {
@@ -144,13 +149,12 @@
     });
   };
 
-  // Drive REST call with a 20 s timeout. Uses the signed-in token when available, otherwise the public API key.
+  // Drive REST call with a 20 s timeout. Always uses the signed-in user's token (no anonymous access).
   const api = async (url, opts = {}) => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 20000);
     const headers = { ...(opts.headers || {}) };
     if (hasToken()) headers.Authorization = `Bearer ${session.token}`;
-    else if (CFG.GOOGLE_API_KEY) headers["X-Goog-Api-Key"] = CFG.GOOGLE_API_KEY;
     try { return await fetch(url, { ...opts, headers, signal: ctl.signal, cache: "no-store" }); }
     finally { clearTimeout(timer); }
   };
@@ -174,35 +178,48 @@
     try { localStorage.setItem(FILE_KEY, id); } catch { /* ignore */ }
   };
 
+  // Downloads the data file with the signed-in token. Returns { status, data }; nothing is put on screen here.
   const loadRemote = async () => {
     let res;
     try { res = await api(`${DRIVE}/files/${drive.fileId}?alt=media`); }
-    catch { return "offline"; }
-    if (res.status === 401) { session.token = ""; return "needsignin"; }
-    if (res.status === 403 || res.status === 404) return session.token ? "noaccess" : "needsignin";
-    if (!res.ok) return "error";
-    try { state = sanitize(await readJson(res)); } catch { return "invalid"; }
-    saveLocal();
-    return "ok";
+    catch { return { status: "offline" }; }
+    if (res.status === 401) { session.token = ""; return { status: "needsignin" }; }
+    if (res.status === 403 || res.status === 404) return { status: "noaccess" };
+    if (!res.ok) return { status: "error" };
+    try { return { status: "ok", data: sanitize(await readJson(res)) }; } catch { return { status: "invalid" }; }
   };
 
   const loadRole = async () => {
-    role = "viewer"; drive.owner = false; drive.metaDenied = false;
+    role = "viewer"; drive.owner = false; drive.metaDenied = false; drive.notListed = false;
     if (!hasToken()) return;
     try {
-      const res = await api(`${DRIVE}/files/${drive.fileId}?fields=ownedByMe,capabilities(canEdit)`);
+      const res = await api(`${DRIVE}/files/${drive.fileId}?fields=ownedByMe,capabilities(canEdit),permissions(type,role,emailAddress)`);
       if (!res.ok) { drive.metaDenied = true; return; }
       const m = await readJson(res);
       drive.owner = m.ownedByMe === true;
       role = m.capabilities && m.capabilities.canEdit === true ? "editor" : "viewer";
+      // Google only returns the access list to people who can manage it; when it is visible, the account must be named in it.
+      if (Array.isArray(m.permissions) && m.permissions.length && session.email) {
+        const me = session.email.toLowerCase();
+        drive.notListed = !m.permissions.some((p) => p.type === "user" && typeof p.emailAddress === "string" && p.emailAddress.toLowerCase() === me);
+      }
     } catch { drive.metaDenied = true; }
   };
 
+  const clearData = () => { state = { categories: { Credit: [], Debit: [] }, transactions: [] }; };
+
+  // Data is only fetched and shown when the user is signed in and Google confirms access to the shared file.
   const refresh = async (manual) => {
     if (!driveMode) return;
-    if (!drive.fileId) { drive.status = "nofile"; role = "viewer"; updateUi(); return; }
-    drive.status = await loadRemote();
-    if (drive.status === "ok") await loadRole(); else role = "viewer";
+    role = "viewer";
+    if (!drive.fileId) { drive.status = "nofile"; clearData(); fullRender(); updateUi(); return; }
+    if (!hasToken()) { drive.status = "needsignin"; clearData(); fullRender(); updateUi(); return; }
+    const r = await loadRemote();
+    drive.status = r.status;
+    if (r.status === "ok") {
+      await loadRole();
+      if (drive.notListed) { drive.status = "notlisted"; role = "viewer"; clearData(); } else state = r.data;
+    } else clearData();
     fullRender();
     updateUi();
     if (manual) toast(drive.status === "ok" ? "Up to date" : "Could not refresh");
@@ -222,7 +239,7 @@
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next),
       });
       if (!put.ok) throw new Error(put.status === 403 ? "denied" : "write");
-      state = next; saveLocal();
+      state = next;
       return true;
     } catch (e) {
       toast(e.message === "denied" ? "Google Drive refused the change: you do not have edit access." : "Could not save to Google Drive. Nothing was changed.");
@@ -324,7 +341,7 @@
         const row = el("div", "perm");
         if (p.type === "anyone") {
           linkPermId = p.id;
-          row.append(el("span", "perm-name", "Anyone with the link"), el("span", "perm-role", "Viewer"));
+          row.append(el("span", "perm-name", "Anyone with the link (not allowed in this app)"), el("span", "perm-role", "Viewer"));
         } else if (p.role === "owner") {
           row.append(el("span", "perm-name", p.emailAddress || p.displayName || "Owner"), el("span", "perm-role", "Owner"));
         } else {
@@ -349,7 +366,9 @@
         }
         box.append(row);
       }
-      $("shareLinkBtn").textContent = linkPermId ? "Stop link sharing (anyone with link can view)" : "Allow anyone with the link to view (no sign-in)";
+      // Public link access is never offered; the button only appears to remove one that already exists.
+      $("shareLinkBtn").hidden = !linkPermId;
+      $("shareLinkBtn").textContent = "Remove “anyone with the link” access";
     } catch { box.replaceChildren(el("p", "error", "Could not load the access list.")); }
   };
 
@@ -375,9 +394,8 @@
   const toggleLinkSharing = async () => {
     try {
       await getToken();
-      const res = linkPermId
-        ? await api(permUrl(`/${linkPermId}`), { method: "DELETE" })
-        : await api(permUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "anyone", role: "reader" }) });
+      if (!linkPermId) return;
+      const res = await api(permUrl(`/${linkPermId}`), { method: "DELETE" });
       if (!res.ok && res.status !== 204) throw new Error("link");
       renderPerms();
     } catch { shareError("Could not change link sharing."); }
@@ -408,7 +426,8 @@
 
   // ---------- rendering ----------
   const renderFilterOptions = () => {
-    const months = [...new Set(state.transactions.map((t) => t.date.slice(0, 7)))].sort().reverse();
+    // The current month is always offered (even before it has entries) so it can be the default.
+    const months = [...new Set([currentMonth(), ...state.transactions.map((t) => t.date.slice(0, 7))])].sort().reverse();
     const mSel = $("fMonth");
     mSel.replaceChildren(new Option("All months", ""), ...months.map((m) => new Option(monthLabel(m), m)));
     mSel.value = months.includes(filters.month) ? filters.month : "";
@@ -525,6 +544,7 @@
 
   const updateUi = () => {
     const signed = Boolean(session.email) && hasToken();
+    document.body.classList.toggle("locked", driveMode && drive.status !== "ok");   // hide all data until access is confirmed
     $("addBtn").hidden = !canEdit();
     $("importJson").hidden = !canEdit();
     $("resetSeed").hidden = !canEdit();
@@ -532,7 +552,9 @@
     $("menuSignOut").hidden = !driveMode || !signed;
     $("menuRefresh").hidden = !driveMode || !drive.fileId;
     $("menuShare").hidden = !driveMode || !signed || !drive.owner || !drive.fileId;
-    $("menuLink").hidden = !driveMode || !drive.fileId;
+    $("menuLink").hidden = !driveMode || !drive.fileId || !signed;
+    $("exportCsv").hidden = driveMode && drive.status !== "ok";
+    $("exportJson").hidden = driveMode && drive.status !== "ok";
     const who = $("who");
     who.hidden = !driveMode;
     who.textContent = !driveMode ? "" : `${signed ? session.email : "Not signed in"} · ${canEdit() ? "Editor" : "View only"}`;
@@ -544,13 +566,14 @@
       return;
     }
     switch (drive.status) {
-      case "needsignin": setBanner("This file is private. Sign in with an authorised Google account.", [["Sign in with Google", signIn]]); break;
-      case "noaccess": setBanner("Confirm the shared file once on this device so Google lets this app open it.", [["Choose file", pickFile]]); break;
-      case "offline": case "error": setBanner("Could not reach Google Drive. Showing the last saved copy.", [["Retry", () => refresh(true)]]); break;
+      case "needsignin": setBanner("Sign in with a Google account that has been given access to view this data.", [["Sign in with Google", signIn]]); break;
+      case "notlisted": setBanner(`${session.email} has not been given access to this data. Ask the owner to add this email as a viewer or editor.`, [["Sign in with another account", signIn]]); break;
+      case "noaccess": setBanner("Access denied. If the owner has added your email, confirm the shared file once on this device so Google lets this app open it.", [["Choose file", pickFile], ["Sign in with another account", signIn]]); break;
+      case "offline": case "error": setBanner("Could not reach Google Drive.", [["Retry", () => refresh(true)]]); break;
       case "invalid": setBanner("The Drive file is not a valid SGRBC Finance data file.", [["Retry", () => refresh(true)]]); break;
       case "ok":
         if (canEdit()) setBanner("");
-        else if (!signed) setBanner("View only. Sign in with an account that has edit access to make changes.", [["Sign in with Google", signIn]]);
+        else if (!signed) setBanner("Sign in to continue.", [["Sign in with Google", signIn]]);
         else if (drive.metaDenied) setBanner("View only. If you were given edit access, confirm the file once to unlock editing.", [["Choose file", pickFile]]);
         else setBanner("Your account has view-only access to this data.");
         break;
@@ -559,10 +582,15 @@
   };
 
   // ---------- add / edit dialog ----------
+  // Debit entries may only use DEBIT_CATEGORIES. An older entry with a retired category must be re-categorised before saving.
+  const formCategories = (type) => (type === "Debit" ? DEBIT_CATEGORIES : state.categories[type]);
   const fillCategoryOptions = (selected) => {
     const sel = $("fCat");
-    sel.replaceChildren(...state.categories[formType].map((c) => new Option(c, c)));
-    if (selected && state.categories[formType].includes(selected)) sel.value = selected;
+    const list = formCategories(formType);
+    const options = list.map((c) => new Option(c, c));
+    if (selected && !list.includes(selected)) options.unshift(new Option(`Choose a category (was: ${selected})`, ""));
+    sel.replaceChildren(...options);
+    if (selected && list.includes(selected)) sel.value = selected;
   };
   const setFormType = (type, selected) => {
     formType = type;
@@ -654,7 +682,7 @@
       description: $("fDesc").value.trim(),
     };
     if (formAttachment) tx.attachment = formAttachment;
-    if (!isValidTx(tx) || !state.categories[tx.type].includes(tx.category)) {
+    if (!isValidTx(tx) || !formCategories(tx.type).includes(tx.category)) {
       showFormError("Please enter a valid amount (above 0), category and date.");
       return;
     }
@@ -716,11 +744,85 @@
     if (await mutate(() => seed)) { fullRender(); toast("Original data restored"); }
   };
 
+  // ---------- install as an app (PWA) ----------
+  // Chrome/Edge (PC + Android) give us a native install prompt; Safari/iPhone and Firefox need manual steps.
+  let installEvent = null;
+  const isInstalled = () =>
+    window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: window-controls-overlay)").matches || navigator.standalone === true;
+  const platform = () => {
+    const ua = navigator.userAgent || "";
+    const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const android = /Android/.test(ua);
+    const firefox = /Firefox|FxiOS/.test(ua);
+    const edge = /Edg|EdgA|EdgiOS/.test(ua);
+    const safari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS|Edg|EdgA|EdgiOS|OPR/.test(ua);
+    return { ios, android, firefox, edge, safari };
+  };
+  const updateInstallUi = () => { $("menuInstall").hidden = isInstalled(); };
+
+  const installHelp = () => {
+    const p = platform();
+    let intro = "";
+    let steps = [];
+    if (p.ios) {
+      intro = p.safari ? "On iPhone and iPad, installing is done from the Share menu." : "On iPhone and iPad, installing is done from the Share menu. If you do not see the option below, open this page in Safari.";
+      steps = ["Tap the Share button (a square with an arrow pointing up) in the browser toolbar.", "Scroll down and tap “Add to Home Screen”.", "Tap “Add”. The SGRBC Finance icon now appears on your home screen."];
+    } else if (p.android && p.firefox) {
+      intro = "Firefox on Android can install this app from its menu.";
+      steps = ["Tap the menu (⋮) in Firefox.", "Tap “Install”.", "Confirm with “Add”. The icon appears on your home screen."];
+    } else if (p.android) {
+      intro = "Your browser did not offer the install prompt automatically, but you can still install from its menu.";
+      steps = ["Tap the menu (⋮) in the top-right corner.", "Tap “Install app” (or “Add to Home screen”).", "Confirm with “Install”. The icon appears on your home screen."];
+    } else if (p.firefox) {
+      intro = "Firefox on a computer cannot install web apps.";
+      steps = ["Open this same address in Google Chrome or Microsoft Edge.", "Click the install icon at the right end of the address bar, or open the menu and choose “Install SGRBC Finance”.", "Or keep using it in Firefox and bookmark the page (Ctrl+D)."];
+    } else if (p.edge) {
+      intro = "Microsoft Edge can install this site as an app.";
+      steps = ["Click the menu (…) at the top right of Edge.", "Choose “Apps”, then “Install this site as an app”.", "Click “Install”. You can pin it to the taskbar or Start."];
+    } else if (p.safari) {
+      intro = "Safari on a Mac can add this site to the Dock.";
+      steps = ["In the menu bar choose File, then “Add to Dock…”.", "Click “Add”."];
+    } else {
+      intro = "Google Chrome can install this site as an app.";
+      steps = ["Click the install icon at the right end of the address bar.", "If you do not see it, open the menu (⋮) and choose “Cast, save and share”, then “Install page as app”.", "Click “Install”."];
+    }
+    $("installIntro").textContent = intro;
+    $("installSteps").replaceChildren(...steps.map((s) => el("li", "", s)));
+    $("installDlg").showModal();
+  };
+
+  const installApp = async () => {
+    if (installEvent) {
+      const ev = installEvent;
+      installEvent = null;
+      try {
+        await ev.prompt();
+        const choice = await ev.userChoice;
+        if (choice && choice.outcome === "accepted") toast("Installing…");
+      } catch { installHelp(); }
+      return;
+    }
+    installHelp();
+  };
+
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvent = e; updateInstallUi(); });
+  window.addEventListener("appinstalled", () => { installEvent = null; updateInstallUi(); toast("App installed"); });
+
   // ---------- wiring ----------
   const wire = () => {
     $("fMonth").addEventListener("change", (e) => { filters.month = e.target.value; shown = PAGE; render(); });
     $("fCategory").addEventListener("change", (e) => { filters.category = e.target.value; shown = PAGE; render(); });
-    $("fSearch").addEventListener("input", (e) => { filters.search = e.target.value; shown = PAGE; render(); });
+    $("fSearch").addEventListener("input", (e) => {
+      filters.search = e.target.value; shown = PAGE;
+      $("fSearchClear").hidden = !e.target.value;
+      render();
+    });
+    $("fSearchClear").addEventListener("click", () => {
+      $("fSearch").value = ""; filters.search = ""; shown = PAGE;
+      $("fSearchClear").hidden = true;
+      render();
+      $("fSearch").focus();
+    });
     document.querySelectorAll("[data-type]").forEach((b) => b.addEventListener("click", () => {
       filters.type = b.dataset.type; shown = PAGE;
       document.querySelectorAll("[data-type]").forEach((x) => x.classList.toggle("active", x === b));
@@ -757,6 +859,9 @@
     const menu = $("menu");
     $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
     document.addEventListener("click", () => (menu.hidden = true));
+    $("menuInstall").addEventListener("click", installApp);
+    $("installClose").addEventListener("click", () => $("installDlg").close());
+    updateInstallUi();
     $("exportCsv").addEventListener("click", exportCsv);
     $("exportJson").addEventListener("click", exportJson);
     $("importJson").addEventListener("click", () => $("importFile").click());
@@ -795,11 +900,13 @@
       try { stored = localStorage.getItem(FILE_KEY) || ""; } catch { /* ignore */ }
       drive.fileId = validFileId(stored) ? stored : (validFileId(CFG.DRIVE_FILE_ID) ? CFG.DRIVE_FILE_ID : "");
     }
-    state = readLocal(CACHE_KEY) || state;   // show last known data immediately
+    // Nothing is loaded or shown until the user signs in and Google confirms access. Remove any copy cached by older versions.
+    try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ }
     fullRender(); updateUi();
     await refresh();
-    setInterval(() => { if (document.visibilityState === "visible" && !$("dlg").open && !$("shareDlg").open) refresh(); }, 60000);
-    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !$("dlg").open) refresh(); });
+    const autoRefresh = () => { if (hasToken() && document.visibilityState === "visible" && !$("dlg").open && !$("shareDlg").open) refresh(); };
+    setInterval(autoRefresh, 60000);
+    document.addEventListener("visibilitychange", autoRefresh);
   };
   start();
 
