@@ -231,25 +231,37 @@
     }
   };
 
-  const createDriveFile = async () => {
-    try {
-      await getToken();
-      let data = readLocal(LOCAL_KEY);
-      if (!data) data = await loadSeed();
-      const boundary = `sgrbc${newId().replace(/-/g, "")}`;
-      const meta = { name: "SGRBC Finance Data.json", mimeType: "application/json" };
-      const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n` +
-        `--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(data)}\r\n--${boundary}--`;
-      const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, {
-        method: "POST", headers: { "Content-Type": `multipart/related; boundary=${boundary}` }, body,
-      });
-      if (!res.ok) throw new Error("create");
-      const id = (await readJson(res)).id;
-      if (!validFileId(id)) throw new Error("create");
-      setFileId(id);
-      await refresh();
-      toast("Data file created in your Google Drive. Use ⋮ → Share & access to add people.");
-    } catch { toast("Could not create the file in Google Drive."); }
+
+  // Accepts a Drive link (…/d/ID/…, …?id=ID) or a bare file ID.
+  const parseDriveId = (input) => {
+    const s = String(input || "").trim();
+    if (validFileId(s)) return s;
+    let u;
+    try { u = new URL(s); } catch { return ""; }
+    if (u.protocol !== "https:" || !/^(drive|docs)\.google\.com$/.test(u.hostname)) return "";
+    const m = u.pathname.match(/\/d\/([A-Za-z0-9_-]{10,100})/);
+    const id = m ? m[1] : u.searchParams.get("id");
+    return validFileId(id) ? id : "";
+  };
+  const linkError = (msg) => { const e = $("linkError"); e.textContent = msg || ""; e.hidden = !msg; };
+  const openLinkDialog = () => {
+    $("linkInput").value = "";
+    linkError("");
+    $("linkDlg").showModal();
+    $("linkInput").focus();
+  };
+  const submitLink = async (ev) => {
+    ev.preventDefault();
+    const raw = $("linkInput").value.trim();
+    if (/docs\.google\.com\/spreadsheets/.test(raw)) {
+      linkError("That is a Google Sheet. This app stores its data in a file named “SGRBC Finance Data.json” in Google Drive — paste that file's link.");
+      return;
+    }
+    const id = parseDriveId(raw);
+    if (!id) { linkError("That does not look like a Google Drive file link."); return; }
+    $("linkDlg").close();
+    setFileId(id);
+    await refresh(true);
   };
 
   const pickFile = async () => {
@@ -527,7 +539,7 @@
     if (!driveMode) { setBanner(""); return; }
     if (!drive.fileId) {
       setBanner("No shared data file is linked yet.",
-        signed ? [["Create data file in my Drive", createDriveFile], ["Choose existing file", pickFile]] : [["Sign in with Google", signIn]]);
+        signed ? [["Paste shared file link", openLinkDialog]] : [["Sign in with Google", signIn], ["Paste shared file link", openLinkDialog]]);
       return;
     }
     switch (drive.status) {
@@ -758,6 +770,9 @@
     $("shareForm").addEventListener("submit", addPerson);
     $("shareLinkBtn").addEventListener("click", toggleLinkSharing);
     $("shareClose").addEventListener("click", () => $("shareDlg").close());
+    $("linkForm").addEventListener("submit", submitLink);
+    $("linkCancel").addEventListener("click", () => $("linkDlg").close());
+    $("linkPicker").addEventListener("click", () => { $("linkDlg").close(); pickFile(); });
   };
 
   // ---------- start ----------

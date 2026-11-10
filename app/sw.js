@@ -1,6 +1,6 @@
 "use strict";
 // Offline cache: app shell + seed data. Bump CACHE when any of these files change.
-const CACHE = "sgrbc-finance-v5";
+const CACHE = "sgrbc-finance-v7";
 const ASSETS = [
   "./", "index.html", "styles.css", "app.js", "config.js", "seed.json", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png", "icons/logo.png",

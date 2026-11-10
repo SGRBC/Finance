@@ -40,7 +40,7 @@ Enforcement is done by **Google Drive**, not by the page: every save is an authe
 6. Note your **project number** (Cloud Console → Dashboard). It is also the digits before the `-` in the client ID.
 7. Edit `app/config.js` and fill in `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`, `GOOGLE_APP_ID`.
 8. Host the `app/` folder on any **HTTPS** static host (GitHub Pages, Netlify, Cloudflare Pages, internal server).
-9. Open the app, ⋮ → *Sign in with Google*, then click **Create data file in my Drive**. The current 468 transactions are uploaded.
+9. Open the app, ⋮ → *Sign in with Google*, then click **Paste shared file link** and paste the Drive link of the existing shared data file (`SGRBC Finance Data.json`). The app no longer creates data files; all changes go only to that shared file.
 10. ⋮ → **Share & access…** → add people by Google email as **Viewer** or **Editor**, or switch on *anyone with the link can view*.
 11. ⋮ → **Copy link for other devices** and send it. Optional: put the file ID in `DRIVE_FILE_ID` in `config.js` so every device uses the file automatically.
 

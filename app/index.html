@@ -126,6 +126,25 @@
     </form>
   </dialog>
 
+  <dialog id="linkDlg">
+    <form id="linkForm" autocomplete="off">
+      <h2>Use existing Google Drive file</h2>
+      <p class="hint">Paste the Google Drive link of the SGRBC Finance data file (SGRBC Finance Data.json).</p>
+      <label>Google Drive link
+        <input id="linkInput" type="text" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" required>
+      </label>
+      <p id="linkError" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="linkPicker" class="small">Use Google file picker instead</button>
+      </div>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button type="button" id="linkCancel">Cancel</button>
+        <button type="submit" class="primary">Open file</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="imgDlg">
     <img id="imgFull" class="img-full" alt="Attachment">
     <div class="actions">
