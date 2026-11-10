@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://*.gstatic.com; style-src 'self' https://accounts.google.com/gsi/style https://www.gstatic.com; script-src 'self' https://accounts.google.com/gsi/client https://apis.google.com https://www.gstatic.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/ https://*.google.com https://*.googleapis.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d4ed8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="SGRBC Finance">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <title>SGRBC Finance Tracker</title>
+</head>
+<body>
+  <header class="topbar">
+    <h1>SGRBC Finance</h1>
+    <span id="who" class="who" hidden></span>
+    <button id="menuBtn" class="icon-btn" aria-label="Menu" aria-haspopup="true">&#8942;</button>
+    <div id="menu" class="menu" hidden>
+      <button id="menuSignIn" hidden>Sign in with Google</button>
+      <button id="menuSignOut" hidden>Sign out</button>
+      <button id="menuRefresh" hidden>Refresh from Google Drive</button>
+      <button id="menuShare" hidden>Share &amp; access…</button>
+      <button id="menuLink" hidden>Copy link for other devices</button>
+      <button id="exportCsv">Export CSV</button>
+      <button id="exportJson">Backup (JSON)</button>
+      <button id="importJson">Restore from backup</button>
+      <button id="resetSeed" class="danger">Reset to original spreadsheet data</button>
+    </div>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
+  </header>
+
+  <div id="banner" class="banner" hidden>
+    <span id="bannerText"></span>
+    <span id="bannerActions" class="banner-actions"></span>
+  </div>
+
+  <main>
+    <section class="filters" aria-label="Filters">
+      <select id="fMonth" aria-label="Month"></select>
+      <select id="fCategory" aria-label="Category"></select>
+      <input id="fSearch" type="search" placeholder="Search description" aria-label="Search">
+      <div class="seg" role="group" aria-label="Type">
+        <button data-type="" class="active">All</button>
+        <button data-type="Credit">Credit</button>
+        <button data-type="Debit">Debit</button>
+      </div>
+    </section>
+
+    <section class="cards" aria-label="Totals">
+      <div class="card credit"><span>Credits</span><strong id="sumCredit">0</strong></div>
+      <div class="card debit"><span>Debits</span><strong id="sumDebit">0</strong></div>
+      <div class="card balance"><span>Balance</span><strong id="sumBalance">0</strong></div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="list" class="active">Transactions</button>
+      <button role="tab" data-tab="summary">Summary</button>
+    </nav>
+
+    <section id="tabList">
+      <div id="list"></div>
+      <button id="moreBtn" class="more" hidden>Show more</button>
+      <p id="empty" class="empty" hidden>No transactions match.</p>
+    </section>
+
+    <section id="tabSummary" hidden>
+      <h2>By category</h2>
+      <div id="byCategory"></div>
+      <h2>By month</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Month</th><th>Credits</th><th>Debits</th><th>Net</th></tr></thead>
+          <tbody id="byMonth"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <button id="addBtn" class="fab" aria-label="Add transaction">+</button>
+
+  <dialog id="dlg">
+    <form id="form" method="dialog" autocomplete="off">
+      <h2 id="dlgTitle">Add transaction</h2>
+      <div class="seg big" role="group" aria-label="Transaction type">
+        <button type="button" data-ftype="Credit" class="active">Credit (in)</button>
+        <button type="button" data-ftype="Debit">Debit (out)</button>
+      </div>
+      <label>Amount
+        <input id="fAmount" type="number" inputmode="decimal" step="0.01" min="0.01" max="1000000000" required>
+      </label>
+      <label>Category
+        <select id="fCat" required></select>
+      </label>
+      <label>Date &amp; time
+        <input id="fDate" type="datetime-local" required>
+      </label>
+      <label>Description
+        <input id="fDesc" type="text" maxlength="200">
+      </label>
+      <p id="formError" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="delBtn" class="danger" hidden>Delete</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancelBtn">Cancel</button>
+        <button type="submit" id="saveBtn" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="shareDlg">
+    <h2>Share &amp; access</h2>
+    <p class="hint">Editors can add, change and delete entries. Viewers can only look. Google Drive enforces this.</p>
+    <div id="permList" class="perm-list"></div>
+    <form id="shareForm" autocomplete="off">
+      <label>Google account email
+        <input id="shareEmail" type="email" maxlength="254" placeholder="name@gmail.com" required>
+      </label>
+      <label>Access
+        <select id="shareRole">
+          <option value="reader">Viewer (view only)</option>
+          <option value="writer">Editor (can change data)</option>
+        </select>
+      </label>
+      <p id="shareError" class="error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" id="shareLinkBtn">Allow anyone with the link to view (no sign-in)</button>
+      </div>
+      <div class="actions">
+        <span class="spacer"></span>
+        <button type="button" id="shareClose">Close</button>
+        <button type="submit" id="shareAdd" class="primary">Add person</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
