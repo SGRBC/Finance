@@ -1,22 +1,22 @@
 :root {
-  --bg: #f4f6fa;
+  --bg: #f6f1ec;
   --surface: #ffffff;
-  --text: #1f2328;
-  --muted: #5b6573;
-  --border: #e1e5eb;
-  --accent: #1d4ed8;
+  --text: #2a1f19;
+  --muted: #75655a;
+  --border: #e6dcd2;
+  --accent: #6f4e37;
   --credit: #15803d;
   --debit: #b91c1c;
   --radius: 12px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f141b;
-    --surface: #18202a;
-    --text: #e8ecf1;
-    --muted: #9aa6b5;
-    --border: #2a3441;
-    --accent: #6c9bff;
+    --bg: #1a1411;
+    --surface: #251d18;
+    --text: #f0e8e1;
+    --muted: #b0a196;
+    --border: #3a2f28;
+    --accent: #a77b5a;
     --credit: #4ade80;
     --debit: #f87171;
   }
@@ -40,6 +40,8 @@ button { cursor: pointer; }
   background: var(--accent); color: #fff;
 }
 .topbar h1 { font-size: 18px; margin: 0; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { width: 36px; height: 36px; border-radius: 8px; background: #fff; }
 .icon-btn { background: none; border: 0; color: #fff; font-size: 26px; line-height: 1; padding: 4px 10px; min-width: 44px; min-height: 44px; }
 .menu {
   position: absolute; right: 12px; top: calc(54px + env(safe-area-inset-top));
@@ -147,7 +149,15 @@ dialog label input, dialog label select { margin-top: 4px; color: var(--text); f
 @media (min-width: 844px) { .banner { margin: 12px auto 0; } }
 .banner-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .banner-actions button { padding: 8px 14px; min-height: 40px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; }
-.tx:disabled { cursor: default; opacity: 1; color: inherit; }
+.tx.ro { cursor: default; }
+.thumb { width: 44px; height: 44px; flex: none; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); cursor: zoom-in; }
+.tx .main { flex: 1; }
+.attach { margin-top: 12px; }
+.attach-label { display: block; color: var(--muted); font-size: 13px; }
+.att-preview { display: block; max-width: 100%; max-height: 220px; margin-top: 6px; border-radius: 10px; border: 1px solid var(--border); cursor: zoom-in; }
+.attach-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.attach-actions button { padding: 10px 16px; min-height: 44px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+.img-full { display: block; max-width: 100%; max-height: 75vh; margin: 0 auto; border-radius: 10px; }
 .hint { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
 .perm-list { margin-bottom: 8px; }
 .perm { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }

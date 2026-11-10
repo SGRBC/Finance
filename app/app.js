@@ -10,6 +10,8 @@
   const FILE_KEY = "sgrbc-finance-file-id";
   const PAGE = 50;
   const MAX_BYTES = 20 * 1024 * 1024;
+  const MAX_ATTACH = 150000;                      // max length of one stored attachment (data URL characters, ~110 KB)
+  const MAX_PHOTO_FILE = 25 * 1024 * 1024;        // largest original image we will try to read
   const $ = (id) => document.getElementById(id);
   const fmt = new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" });
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -21,6 +23,7 @@
   let shown = PAGE;
   let editingId = null;
   let formType = "Credit";
+  let formAttachment = "";
 
   // Drive mode state
   const session = { token: "", expires: 0, email: "", name: "" };
@@ -60,8 +63,12 @@
   }));
 
   // ---------- validation (also applied to imported / downloaded data) ----------
+  const validAttachment = (s) =>
+    typeof s === "string" && s.length <= MAX_ATTACH && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(s);
+
   const isValidTx = (t) =>
     t && typeof t === "object" &&
+    (t.attachment === undefined || validAttachment(t.attachment)) &&
     (t.type === "Credit" || t.type === "Debit") &&
     typeof t.category === "string" && t.category.length > 0 && t.category.length <= 60 &&
     typeof t.date === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(t.date) &&
@@ -82,7 +89,9 @@
       if (!isValidTx(t) || seen.has(t.id)) continue;
       seen.add(t.id);
       if (!cats[t.type].includes(t.category)) cats[t.type].push(t.category);
-      txs.push({ id: t.id, date: t.date, type: t.type, category: t.category, amount: t.amount, description: t.description });
+      const clean = { id: t.id, date: t.date, type: t.type, category: t.category, amount: t.amount, description: t.description };
+      if (t.attachment) clean.attachment = t.attachment;
+      txs.push(clean);
     }
     if (!txs.length && data.transactions.length) throw new Error("no valid rows");
     return { categories: cats, transactions: txs };
@@ -423,9 +432,15 @@
       const row = el("button", `tx ${t.type}`);
       row.type = "button";
       row.dataset.id = t.id;
-      row.disabled = !canEdit();
+      row.classList.toggle("ro", !canEdit());
       const main = el("span", "main");
       main.append(el("span", "desc", t.description || t.category), el("span", "meta", `${t.category} · ${t.date.slice(11)}`));
+      if (t.attachment) {
+        const thumb = el("img", "thumb");
+        thumb.src = t.attachment;
+        thumb.alt = "Attachment preview (tap to enlarge)";
+        row.append(thumb);
+      }
       row.append(main, el("span", "amt", `${t.type === "Credit" ? "+" : "−"}${fmt.format(t.amount)}`));
       root.append(row);
     }
@@ -551,10 +566,69 @@
     $("fAmount").value = tx ? tx.amount : "";
     $("fDate").value = tx ? tx.date : nowLocal();
     $("fDesc").value = tx ? tx.description : "";
+    setAttachment(tx && tx.attachment ? tx.attachment : "");
     $("dlg").showModal();
     if (!tx) $("fAmount").focus();
   };
   const showFormError = (msg) => { const e = $("formError"); e.textContent = msg; e.hidden = false; };
+
+  // ---------- attachments (photo / image upload) ----------
+  const setAttachment = (dataUrl) => {
+    formAttachment = dataUrl;
+    const p = $("attPreview");
+    p.hidden = !dataUrl;
+    if (dataUrl) p.src = dataUrl; else p.removeAttribute("src");
+    $("attRemove").hidden = !dataUrl;
+  };
+  const showImage = (src) => { $("imgFull").src = src; $("imgDlg").showModal(); };
+
+  const loadBitmap = async (file) => {
+    if (window.createImageBitmap) {
+      try { return await createImageBitmap(file, { imageOrientation: "from-image" }); } catch { /* fall back below */ }
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(new Error("read"));
+      r.readAsDataURL(file);
+    });
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("decode"));
+      img.src = dataUrl;
+    });
+  };
+
+  // Shrinks the picked/captured image and re-encodes it as JPEG so it stays small enough to store with the data.
+  const compressImage = async (file) => {
+    const bmp = await loadBitmap(file);
+    const w0 = bmp.width, h0 = bmp.height;
+    if (!w0 || !h0) throw new Error("decode");
+    for (const [maxDim, q] of [[1000, 0.75], [900, 0.65], [800, 0.55], [700, 0.5], [600, 0.45], [500, 0.4]]) {
+      const scale = Math.min(1, maxDim / Math.max(w0, h0));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(w0 * scale));
+      c.height = Math.max(1, Math.round(h0 * scale));
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(bmp, 0, 0, c.width, c.height);
+      const url = c.toDataURL("image/jpeg", q);
+      if (validAttachment(url)) { if (bmp.close) bmp.close(); return url; }
+    }
+    if (bmp.close) bmp.close();
+    throw new Error("size");
+  };
+
+  const onPickImage = async (input) => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.size > MAX_PHOTO_FILE) { toast("Please choose an image smaller than 25 MB."); return; }
+    try { setAttachment(await compressImage(file)); }
+    catch { toast("Could not use that image. Try a different photo."); }
+  };
 
   const submitForm = async (ev) => {
     ev.preventDefault();
@@ -566,6 +640,7 @@
       date: $("fDate").value.slice(0, 16),
       description: $("fDesc").value.trim(),
     };
+    if (formAttachment) tx.attachment = formAttachment;
     if (!isValidTx(tx) || !state.categories[tx.type].includes(tx.category)) {
       showFormError("Please enter a valid amount (above 0), category and date.");
       return;
@@ -647,8 +722,19 @@
     $("list").addEventListener("click", (e) => {
       const row = e.target.closest(".tx");
       const tx = row && state.transactions.find((t) => t.id === row.dataset.id);
-      if (tx) openDialog(tx);
+      if (!tx) return;
+      if (e.target.classList.contains("thumb") && tx.attachment) { showImage(tx.attachment); return; }
+      openDialog(tx);
     });
+    // Camera button only on touch devices (phones/tablets); desktops just get "Upload image".
+    $("attCamera").hidden = !window.matchMedia("(pointer: coarse)").matches;
+    $("attCamera").addEventListener("click", () => $("attFileCam").click());
+    $("attUpload").addEventListener("click", () => $("attFile").click());
+    $("attFileCam").addEventListener("change", (e) => onPickImage(e.target));
+    $("attFile").addEventListener("change", (e) => onPickImage(e.target));
+    $("attRemove").addEventListener("click", () => setAttachment(""));
+    $("attPreview").addEventListener("click", () => { if (formAttachment) showImage(formAttachment); });
+    $("imgClose").addEventListener("click", () => $("imgDlg").close());
     $("addBtn").addEventListener("click", () => openDialog(null));
     document.querySelectorAll("[data-ftype]").forEach((b) => b.addEventListener("click", () => setFormType(b.dataset.ftype)));
     $("form").addEventListener("submit", submitForm);

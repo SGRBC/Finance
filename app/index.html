@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https://*.googleusercontent.com https://*.gstatic.com; style-src 'self' https://accounts.google.com/gsi/style https://www.gstatic.com; script-src 'self' https://accounts.google.com/gsi/client https://apis.google.com https://www.gstatic.com; connect-src 'self' https://www.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/ https://*.google.com https://*.googleapis.com; base-uri 'none'; form-action 'none'; object-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#1d4ed8">
+  <meta name="theme-color" content="#6f4e37">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="SGRBC Finance">
@@ -17,7 +17,10 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>SGRBC Finance</h1>
+    <div class="brand">
+      <img src="icons/logo.png" class="logo" alt="SGRBC logo" width="36" height="36">
+      <h1>SGRBC Finance</h1>
+    </div>
     <span id="who" class="who" hidden></span>
     <button id="menuBtn" class="icon-btn" aria-label="Menu" aria-haspopup="true">&#8942;</button>
     <div id="menu" class="menu" hidden>
@@ -102,6 +105,17 @@
       <label>Description
         <input id="fDesc" type="text" maxlength="200">
       </label>
+      <div class="attach">
+        <span class="attach-label">Attachment (receipt / proof)</span>
+        <img id="attPreview" class="att-preview" alt="Attachment preview (tap to enlarge)" hidden>
+        <div class="attach-actions">
+          <button type="button" id="attCamera" hidden>Take photo</button>
+          <button type="button" id="attUpload">Upload image</button>
+          <button type="button" id="attRemove" class="danger" hidden>Remove</button>
+        </div>
+        <input id="attFileCam" type="file" accept="image/*" capture="environment" hidden>
+        <input id="attFile" type="file" accept="image/*" hidden>
+      </div>
       <p id="formError" class="error" role="alert" hidden></p>
       <div class="actions">
         <button type="button" id="delBtn" class="danger" hidden>Delete</button>
@@ -110,6 +124,14 @@
         <button type="submit" id="saveBtn" class="primary">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="imgDlg">
+    <img id="imgFull" class="img-full" alt="Attachment">
+    <div class="actions">
+      <span class="spacer"></span>
+      <button type="button" id="imgClose">Close</button>
+    </div>
   </dialog>
 
   <dialog id="shareDlg">
