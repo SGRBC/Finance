@@ -165,3 +165,10 @@ dialog label input, dialog label select { margin-top: 4px; color: var(--text); f
 .perm-role { color: var(--muted); font-size: 13px; }
 .perm select { width: auto; min-height: 40px; }
 button.small { padding: 6px 10px; min-height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); }
+
+/* ---- Google file picker: shown as a centred pop-up over a dimmed background ---- */
+/* Google's picker styles assume the default box model; the app-wide border-box rule collapses its frame to a thin line. */
+.picker-dialog, .picker-dialog *, .picker-dialog-bg { box-sizing: content-box; }
+.picker-dialog-bg { position: fixed !important; inset: 0 !important; width: auto !important; height: auto !important; background: #000; opacity: .5 !important; z-index: 2000 !important; }
+.picker-dialog { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%); z-index: 2001 !important; background: #fff; color: #1f2328; border-radius: 12px; overflow: hidden; }
+.picker-dialog iframe { border: 0; }
