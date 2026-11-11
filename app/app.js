@@ -589,6 +589,7 @@
   };
   // One point per day (when the filtered data is within a single month) or per month, and only for days/months that
   // actually have transactions. `x` is the real position in time, so gaps between points stay honest.
+  // `v` is the running net balance up to and including that day/month; `day` is that day's own net.
   const chartPoints = (list, selected) => {
     const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
     const len = daily ? 10 : 7;
@@ -597,10 +598,12 @@
       const k = t.date.slice(0, len);
       sums.set(k, (sums.get(k) || 0) + (t.type === "Credit" ? t.amount : -t.amount));
     }
+    let running = 0;
     return [...sums].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
       const [y, m, d] = k.split("-").map(Number);
+      running += v;
       return {
-        v,
+        v: running, day: v,
         x: daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1,
         label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}`,
       };
@@ -631,7 +634,7 @@
     const pts = chartPoints(list, list.filter((t) => !chartOff.has(t.category)));
     const on = allCats.length - chartOff.size;
     const item = el("span", "legend-item");
-    item.append(el("i", "sw ln-net"), document.createTextNode(`Net (credits − debits) · ${on} of ${allCats.length} categories`));
+    item.append(el("i", "sw ln-net"), document.createTextNode(`Running net balance (credits − debits) · ${on} of ${allCats.length} categories`));
     legend.append(item);
     if (!pts.length) { box.append(el("p", "empty", "No categories selected.")); return; }
 
@@ -667,7 +670,7 @@
     for (const p of pts) {
       const dot = svgEl("circle", { cx: X(p), cy: Y(p.v), r: n > 60 ? 2.5 : 4 }, `dot ${p.v >= 0 ? "ln-credit" : "ln-debit"}`);
       const tip = svgEl("title");
-      tip.textContent = `${p.label}: net ${fmt.format(p.v)}`;
+      tip.textContent = `${p.label}: balance ${fmt.format(p.v)} (day net ${fmt.format(p.day)})`;
       dot.append(tip);
       svg.append(dot);
     }
