@@ -327,6 +327,7 @@
       if (drive.fileId) view.setFileIds(drive.fileId);
       const builder = new google.picker.PickerBuilder()
         .addView(view)
+        .setOrigin(`${location.protocol}//${location.host}`)
         .setOAuthToken(token)
         .setDeveloperKey(CFG.GOOGLE_API_KEY)
         .setSize(Math.max(566, Math.min(1000, window.innerWidth - 24)), Math.max(350, Math.min(620, window.innerHeight - 24)))
