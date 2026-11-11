@@ -569,6 +569,7 @@
   // ---------- chart (hand-drawn SVG: the page's security policy does not allow chart libraries) ----------
   const SVGNS = "http://www.w3.org/2000/svg";
   const CHART_COLORS = ["#2563eb", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#475569", "#ea580c"];
+  const amountFmt = new Intl.NumberFormat("en-PH", { maximumFractionDigits: 2 });
   const chartOff = new Set();    // categories the user switched off; every other category counts towards the chart
   const svgEl = (tag, attrs = {}, cls) => {
     const n = document.createElementNS(SVGNS, tag);
@@ -650,7 +651,7 @@
     const X = (p) => (span === 0 ? L + pw / 2 : L + inset + ((p.x - x0) / span) * (pw - 2 * inset));
     const Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of net amount (credits minus debits)" }, "chart-svg");
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of running net balance (credits minus debits)" }, "chart-svg");
     for (let v = yMin; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, Math.abs(v) < step / 1000 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
@@ -674,6 +675,20 @@
       dot.append(tip);
       svg.append(dot);
     }
+    // The balance written next to every dot (above it, or below when there is no room above). A value is left out only
+    // when it would sit on top of the previous one; it is still available by hovering / long-pressing the dot.
+    let lastEnd = -1e9;
+    pts.forEach((p, i) => {
+      const txt = amountFmt.format(p.v);
+      const w = txt.length * 5.6 + 4;
+      const cx = Math.min(Math.max(X(p), L + w / 2), W - R - w / 2);
+      if (cx - w / 2 < lastEnd + 2 && i !== n - 1) return;
+      lastEnd = cx + w / 2;
+      const above = Y(p.v) - 10 >= T + 6;
+      const t = svgEl("text", { x: cx, y: above ? Y(p.v) - 9 : Y(p.v) + 17, "text-anchor": "middle" }, `val ${p.v >= 0 ? "pos" : "neg"}`);
+      t.textContent = txt;
+      svg.append(t);
+    });
     box.append(svg);
   };
   const render = () => {

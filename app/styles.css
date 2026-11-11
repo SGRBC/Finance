@@ -209,3 +209,6 @@ body.locked main, body.locked .fab { display: none !important; }
 .chip::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--muted); }
 .chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--text); font-weight: 600; }
 .chip[aria-pressed="true"]::before { background: var(--accent); border-color: var(--accent); }
+.chart-svg text.val { font-size: 10.5px; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+.chart-svg text.val.pos { fill: var(--credit); }
+.chart-svg text.val.neg { fill: var(--debit); }
