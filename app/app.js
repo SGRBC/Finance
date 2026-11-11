@@ -459,6 +459,13 @@
   };
 
   // ---------- rendering ----------
+  // A month only makes sense within a year: with "All years" the month is reset to "All months" and the dropdown is greyed out.
+  const syncMonthSelect = () => {
+    if (!filters.year) filters.month = "";
+    const mSel = $("fMonth");
+    mSel.value = filters.month;
+    mSel.disabled = !filters.year;
+  };
   const renderFilterOptions = () => {
     // The current year is always offered (even before it has entries) so it can be the default.
     const years = [...new Set([currentMonth().slice(0, 4), ...state.transactions.map((t) => t.date.slice(0, 4))])].sort().reverse();
@@ -469,7 +476,7 @@
 
     const mSel = $("fMonth");
     mSel.replaceChildren(new Option("All months", ""), ...MONTHS.map((m, i) => new Option(m, String(i + 1).padStart(2, "0"))));
-    mSel.value = filters.month;
+    syncMonthSelect();
 
     const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
     const cSel = $("fCategory");
@@ -1042,7 +1049,7 @@
 
   // ---------- wiring ----------
   const wire = () => {
-    $("fYear").addEventListener("change", (e) => { filters.year = e.target.value; shown = PAGE; render(); });
+    $("fYear").addEventListener("change", (e) => { filters.year = e.target.value; syncMonthSelect(); shown = PAGE; render(); });
     $("fMonth").addEventListener("change", (e) => { filters.month = e.target.value; shown = PAGE; render(); });
     $("fCategory").addEventListener("change", (e) => { filters.category = e.target.value; shown = PAGE; render(); });
     $("fSearch").addEventListener("input", (e) => {
