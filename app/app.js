@@ -329,7 +329,6 @@
         .addView(view)
         .setOrigin(`${location.protocol}//${location.host}`)
         .setOAuthToken(token)
-        .setDeveloperKey(CFG.GOOGLE_API_KEY)
         .setSize(Math.max(566, Math.min(1000, window.innerWidth - 24)), Math.max(350, Math.min(620, window.innerHeight - 24)))
         .setCallback((d) => {
           if (d.action !== google.picker.Action.PICKED || !d.docs || !d.docs[0]) return;
