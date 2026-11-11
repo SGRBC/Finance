@@ -10,6 +10,9 @@
   const FILE_KEY = "sgrbc-finance-file-id";
   const PAGE = 50;
   const DEBIT_CATEGORIES = ["Pastoral Colabor", "Benevolence", "Utilities", "Recurring", "Special"];
+  // Retired categories: old entries keep them (and still count in the totals), but they are not offered in the Category filter or the chart options.
+  const HIDDEN_CATEGORIES = new Set(["Custodian", "Honorarium", "Representation"]);
+  const listedCategory = (c) => !HIDDEN_CATEGORIES.has(c);
   const MAX_BYTES = 20 * 1024 * 1024;
   const MAX_ATTACH = 150000;                      // max length of one stored attachment (data URL characters, ~110 KB)
   const MAX_PHOTO_FILE = 25 * 1024 * 1024;        // largest original image we will try to read
@@ -225,13 +228,15 @@
     role = "viewer"; drive.owner = false; drive.metaDenied = false; drive.notListed = false;
     if (!hasToken()) return;
     try {
-      const res = await api(`${DRIVE}/files/${drive.fileId}?fields=ownedByMe,capabilities(canEdit),permissions(type,role,emailAddress)`);
+      const res = await api(`${DRIVE}/files/${drive.fileId}?fields=ownedByMe,capabilities(canEdit,canShare),permissions(type,role,emailAddress)`);
       if (!res.ok) { drive.metaDenied = true; return; }
       const m = await readJson(res);
       drive.owner = m.ownedByMe === true;
       role = m.capabilities && m.capabilities.canEdit === true ? "editor" : "viewer";
-      // Google only returns the access list to people who can manage it; when it is visible, the account must be named in it.
-      if (Array.isArray(m.permissions) && m.permissions.length && session.email) {
+      // Google only returns the complete access list to people who can manage sharing (viewers get a partial list),
+      // so only then must the account be named in it. For everyone else, Drive itself already allowed the download.
+      const fullList = m.ownedByMe === true || (m.capabilities && m.capabilities.canShare === true);
+      if (fullList && Array.isArray(m.permissions) && m.permissions.length && session.email) {
         const me = session.email.toLowerCase();
         drive.notListed = !m.permissions.some((p) => p.type === "user" && typeof p.emailAddress === "string" && p.emailAddress.toLowerCase() === me);
       }
@@ -478,7 +483,7 @@
     mSel.replaceChildren(new Option("All months", ""), ...MONTHS.map((m, i) => new Option(m, String(i + 1).padStart(2, "0"))));
     syncMonthSelect();
 
-    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
+    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     const cSel = $("fCategory");
     cSel.replaceChildren(new Option("All categories", ""), ...cats.map((c) => new Option(c, c)));
     cSel.value = cats.includes(filters.category) ? filters.category : "";
@@ -619,7 +624,7 @@
   };
 
   const renderChart = (list) => {
-    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
+    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
     const chips = $("chartCats");
     chips.replaceChildren();
