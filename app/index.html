@@ -45,6 +45,7 @@
 
   <main>
     <section class="filters" aria-label="Filters">
+      <select id="fYear" aria-label="Year"></select>
       <select id="fMonth" aria-label="Month"></select>
       <select id="fCategory" aria-label="Category"></select>
       <div class="search-wrap">
@@ -67,6 +68,7 @@
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="list" class="active">Transactions</button>
       <button role="tab" data-tab="summary">Summary</button>
+      <button role="tab" data-tab="chart">Charts</button>
     </nav>
 
     <section id="tabList">
@@ -81,10 +83,22 @@
       <h2>By month</h2>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Month</th><th>Credits</th><th>Debits</th><th>Net</th></tr></thead>
+          <thead><tr><th>Month</th><th>Credits</th><th>Debits</th><th>Net</th><th>Running net</th></tr></thead>
           <tbody id="byMonth"></tbody>
         </table>
       </div>
+    </section>
+
+    <section id="tabChart" hidden>
+      <h2>Credits vs Debits</h2>
+      <div id="chart" class="chart-box"></div>
+      <div id="chartLegend" class="legend"></div>
+      <h2>Add categories to the chart</h2>
+      <div class="chart-actions">
+        <button type="button" id="chartAll" class="link-btn">Select all</button>
+        <button type="button" id="chartNone" class="link-btn">Clear</button>
+      </div>
+      <div id="chartCats" class="chips"></div>
     </section>
   </main>
 

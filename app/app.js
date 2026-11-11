@@ -24,7 +24,7 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   };
-  let filters = { month: currentMonth(), category: "", search: "", type: "" };   // current month is the default view
+  let filters = { year: currentMonth().slice(0, 4), month: currentMonth().slice(5, 7), category: "", search: "", type: "" };   // current year + month is the default view ("" = all)
   let shown = PAGE;
   let editingId = null;
   let formType = "Credit";
@@ -445,7 +445,8 @@
     const q = filters.search.trim().toLowerCase();
     return state.transactions
       .filter((t) =>
-        (!filters.month || t.date.startsWith(filters.month)) &&
+        (!filters.year || t.date.startsWith(filters.year)) &&
+        (!filters.month || t.date.slice(5, 7) === filters.month) &&
         (!filters.category || t.category === filters.category) &&
         (!filters.type || t.type === filters.type) &&
         (!q || t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)))
@@ -459,12 +460,16 @@
 
   // ---------- rendering ----------
   const renderFilterOptions = () => {
-    // The current month is always offered (even before it has entries) so it can be the default.
-    const months = [...new Set([currentMonth(), ...state.transactions.map((t) => t.date.slice(0, 7))])].sort().reverse();
+    // The current year is always offered (even before it has entries) so it can be the default.
+    const years = [...new Set([currentMonth().slice(0, 4), ...state.transactions.map((t) => t.date.slice(0, 4))])].sort().reverse();
+    const ySel = $("fYear");
+    ySel.replaceChildren(new Option("All years", ""), ...years.map((y) => new Option(y, y)));
+    ySel.value = years.includes(filters.year) ? filters.year : "";
+    filters.year = ySel.value;
+
     const mSel = $("fMonth");
-    mSel.replaceChildren(new Option("All months", ""), ...months.map((m) => new Option(monthLabel(m), m)));
-    mSel.value = months.includes(filters.month) ? filters.month : "";
-    filters.month = mSel.value;
+    mSel.replaceChildren(new Option("All months", ""), ...MONTHS.map((m, i) => new Option(m, String(i + 1).padStart(2, "0"))));
+    mSel.value = filters.month;
 
     const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
     const cSel = $("fCategory");
@@ -544,11 +549,147 @@
     }
     const body = $("byMonth");
     body.replaceChildren();
-    for (const [m, e] of [...months].sort((a, b) => b[0].localeCompare(a[0]))) {
-      const tr = el("tr");
+    // Running net accumulates from the oldest month in the chosen range; rows are shown newest first.
+    let running = 0;
+    const rowsAsc = [...months].sort((a, b) => a[0].localeCompare(b[0])).map(([m, e]) => {
       const net = e.c - e.d;
-      tr.append(el("td", "", monthLabel(m)), el("td", "pos", fmt.format(e.c)), el("td", "neg", fmt.format(e.d)), el("td", net >= 0 ? "pos" : "neg", fmt.format(net)));
+      running += net;
+      return { m, e, net, running };
+    });
+    for (const r of rowsAsc.reverse()) {
+      const tr = el("tr");
+      tr.append(
+        el("td", "", monthLabel(r.m)), el("td", "pos", fmt.format(r.e.c)), el("td", "neg", fmt.format(r.e.d)),
+        el("td", r.net >= 0 ? "pos" : "neg", fmt.format(r.net)),
+        el("td", r.running >= 0 ? "pos" : "neg", fmt.format(r.running)));
       body.append(tr);
+    }
+  };
+
+  // ---------- chart (hand-drawn SVG: the page's security policy does not allow chart libraries) ----------
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const CHART_COLORS = ["#2563eb", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#475569", "#ea580c"];
+  const chartCats = new Set();   // categories the user added to the chart as extra lines
+  const svgEl = (tag, attrs = {}, cls) => {
+    const n = document.createElementNS(SVGNS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (cls) n.setAttribute("class", cls);
+    return n;
+  };
+  const shortNum = (n) => {
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
+    return String(Math.round(n));
+  };
+  const niceStep = (x) => {
+    const p = Math.pow(10, Math.floor(Math.log10(x)));
+    const f = x / p;
+    return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+  };
+  // Buckets: one point per day when the data is within a single month, otherwise one per month.
+  const chartBuckets = (list) => {
+    const months = new Set(list.map((t) => t.date.slice(0, 7)));
+    const daily = months.size <= 1;
+    const len = daily ? 10 : 7;
+    const keys = list.map((t) => t.date.slice(0, len)).sort();
+    const out = [];
+    let [y, m, d] = keys[0].split("-").map(Number);
+    const last = keys[keys.length - 1];
+    for (let i = 0; i < 4000; i++) {   // continuous run from first to last bucket, with a safety limit
+      const key = daily ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : `${y}-${String(m).padStart(2, "0")}`;
+      out.push({ key, label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}` });
+      if (key >= last) break;
+      if (daily) { const nx = new Date(Date.UTC(y, m - 1, d + 1)); y = nx.getUTCFullYear(); m = nx.getUTCMonth() + 1; d = nx.getUTCDate(); }
+      else { m += 1; if (m > 12) { m = 1; y += 1; } }
+    }
+    return { daily, len, buckets: out };
+  };
+
+  const renderChart = (list) => {
+    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
+    for (const c of [...chartCats]) if (!allCats.includes(c)) chartCats.delete(c);
+    const chips = $("chartCats");
+    chips.replaceChildren();
+    allCats.forEach((c, i) => {
+      const b = el("button", "chip", c);
+      b.type = "button";
+      b.setAttribute("aria-pressed", chartCats.has(c) ? "true" : "false");
+      b.style.setProperty("--chip", CHART_COLORS[i % CHART_COLORS.length]);
+      b.addEventListener("click", () => { if (chartCats.has(c)) chartCats.delete(c); else chartCats.add(c); renderChart(list); });
+      chips.append(b);
+    });
+    $("chartAll").onclick = () => { allCats.forEach((c) => chartCats.add(c)); renderChart(list); };
+    $("chartNone").onclick = () => { chartCats.clear(); renderChart(list); };
+
+    const box = $("chart");
+    const legend = $("chartLegend");
+    box.replaceChildren();
+    legend.replaceChildren();
+    if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
+
+    const { len, buckets } = chartBuckets(list);
+    const index = new Map(buckets.map((b, i) => [b.key, i]));
+    const series = [];
+    const makeSeries = (name, cls, color, dash, pick) => {
+      const vals = new Array(buckets.length).fill(0);
+      let any = false;
+      for (const t of list) if (pick(t)) { vals[index.get(t.date.slice(0, len))] += t.amount; any = true; }
+      if (any) series.push({ name, cls, color, dash, vals });
+    };
+    makeSeries("Credit", "ln-credit", "", false, (t) => t.type === "Credit");
+    makeSeries("Debit", "ln-debit", "", false, (t) => t.type === "Debit");
+    allCats.forEach((c, i) => {
+      if (!chartCats.has(c)) return;
+      for (const type of ["Credit", "Debit"]) {
+        makeSeries(`${c} (${type})`, "ln-cat", CHART_COLORS[i % CHART_COLORS.length], type === "Debit", (t) => t.category === c && t.type === type);
+      }
+    });
+
+    const W = 600, H = 300, L = 46, R = 16, T = 12, B = 30;
+    const pw = W - L - R, ph = H - T - B;
+    const rawMax = Math.max(1, ...series.flatMap((s) => s.vals));
+    const step = niceStep(rawMax / 4);
+    const top = step * Math.ceil(rawMax / step);
+    const n = buckets.length;
+    const X = (i) => (n === 1 ? L + pw / 2 : L + (i * pw) / (n - 1));
+    const Y = (v) => T + ph - (v / top) * ph;
+
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of credits and debits" }, "chart-svg");
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, "grid"));
+      const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
+      t.textContent = shortNum(v);
+      svg.append(t);
+    }
+    const stride = Math.ceil(n / 6);
+    buckets.forEach((b, i) => {
+      if (i % stride) return;
+      const t = svgEl("text", { x: X(i), y: H - 10, "text-anchor": "middle" });
+      t.textContent = b.label;
+      svg.append(t);
+    });
+    for (const s of series) {
+      const path = svgEl("path", { d: s.vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ") }, `ln ${s.cls}`);
+      if (s.color) path.style.stroke = s.color;
+      if (s.dash) path.setAttribute("stroke-dasharray", "6 4");
+      svg.append(path);
+      s.vals.forEach((v, i) => {
+        const dot = svgEl("circle", { cx: X(i), cy: Y(v), r: n > 40 ? 0 : 3 }, `dot ${s.cls}`);
+        if (s.color) dot.style.fill = s.color;
+        const tip = svgEl("title");
+        tip.textContent = `${s.name} · ${buckets[i].label}: ${fmt.format(v)}`;
+        dot.append(tip);
+        svg.append(dot);
+      });
+    }
+    box.append(svg);
+
+    for (const s of series) {
+      const item = el("span", "legend-item");
+      const sw = el("i", `sw ${s.cls}${s.dash ? " dashed" : ""}`);
+      if (s.color) sw.style.setProperty("--sw", s.color);
+      item.append(sw, document.createTextNode(s.name));
+      legend.append(item);
     }
   };
 
@@ -557,6 +698,7 @@
     renderCards(list);
     renderList(list);
     renderSummary(list);
+    renderChart(list);
   };
   const fullRender = () => { renderFilterOptions(); render(); };
 
@@ -902,6 +1044,7 @@
 
   // ---------- wiring ----------
   const wire = () => {
+    $("fYear").addEventListener("change", (e) => { filters.year = e.target.value; shown = PAGE; render(); });
     $("fMonth").addEventListener("change", (e) => { filters.month = e.target.value; shown = PAGE; render(); });
     $("fCategory").addEventListener("change", (e) => { filters.category = e.target.value; shown = PAGE; render(); });
     $("fSearch").addEventListener("input", (e) => {
@@ -924,6 +1067,7 @@
       document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("active", x === b));
       $("tabList").hidden = b.dataset.tab !== "list";
       $("tabSummary").hidden = b.dataset.tab !== "summary";
+      $("tabChart").hidden = b.dataset.tab !== "chart";
     }));
     $("moreBtn").addEventListener("click", () => { shown += PAGE; render(); });
     $("list").addEventListener("click", (e) => {
