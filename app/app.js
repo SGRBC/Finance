@@ -569,17 +569,18 @@
   // ---------- chart (hand-drawn SVG: the page's security policy does not allow chart libraries) ----------
   const SVGNS = "http://www.w3.org/2000/svg";
   const CHART_COLORS = ["#2563eb", "#d97706", "#7c3aed", "#0891b2", "#db2777", "#65a30d", "#475569", "#ea580c"];
-  const chartCats = new Set();   // categories the user added to the chart as extra lines
+  const chartOff = new Set();    // categories the user switched off; every other category counts towards the chart
   const svgEl = (tag, attrs = {}, cls) => {
     const n = document.createElementNS(SVGNS, tag);
     for (const k in attrs) n.setAttribute(k, attrs[k]);
     if (cls) n.setAttribute("class", cls);
     return n;
   };
-  const shortNum = (n) => {
-    if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
-    if (n >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
-    return String(Math.round(n));
+  const shortNum = (x) => {
+    const n = Math.abs(x), sign = x < 0 ? "-" : "";
+    if (n >= 1e6) return `${sign}${(n / 1e6).toFixed(1).replace(/\.0$/, "")}M`;
+    if (n >= 1e3) return `${sign}${(n / 1e3).toFixed(1).replace(/\.0$/, "")}k`;
+    return sign + String(Math.round(n));
   };
   const niceStep = (x) => {
     const p = Math.pow(10, Math.floor(Math.log10(x)));
@@ -607,19 +608,18 @@
 
   const renderChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
-    for (const c of [...chartCats]) if (!allCats.includes(c)) chartCats.delete(c);
+    for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
     const chips = $("chartCats");
     chips.replaceChildren();
-    allCats.forEach((c, i) => {
+    for (const c of allCats) {
       const b = el("button", "chip", c);
       b.type = "button";
-      b.setAttribute("aria-pressed", chartCats.has(c) ? "true" : "false");
-      b.style.setProperty("--chip", CHART_COLORS[i % CHART_COLORS.length]);
-      b.addEventListener("click", () => { if (chartCats.has(c)) chartCats.delete(c); else chartCats.add(c); renderChart(list); });
+      b.setAttribute("aria-pressed", chartOff.has(c) ? "false" : "true");
+      b.addEventListener("click", () => { if (chartOff.has(c)) chartOff.delete(c); else chartOff.add(c); renderChart(list); });
       chips.append(b);
-    });
-    $("chartAll").onclick = () => { allCats.forEach((c) => chartCats.add(c)); renderChart(list); };
-    $("chartNone").onclick = () => { chartCats.clear(); renderChart(list); };
+    }
+    $("chartAll").onclick = () => { chartOff.clear(); renderChart(list); };
+    $("chartNone").onclick = () => { allCats.forEach((c) => chartOff.add(c)); renderChart(list); };
 
     const box = $("chart");
     const legend = $("chartLegend");
@@ -627,36 +627,34 @@
     legend.replaceChildren();
     if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
+    // The x-axis comes from all filtered data (so it stays put while categories are toggled); the values only from selected categories.
     const { len, buckets } = chartBuckets(list);
     const index = new Map(buckets.map((b, i) => [b.key, i]));
-    const series = [];
-    const makeSeries = (name, cls, color, dash, pick) => {
-      const vals = new Array(buckets.length).fill(0);
-      let any = false;
-      for (const t of list) if (pick(t)) { vals[index.get(t.date.slice(0, len))] += t.amount; any = true; }
-      if (any) series.push({ name, cls, color, dash, vals });
-    };
-    makeSeries("Credit", "ln-credit", "", false, (t) => t.type === "Credit");
-    makeSeries("Debit", "ln-debit", "", false, (t) => t.type === "Debit");
-    allCats.forEach((c, i) => {
-      if (!chartCats.has(c)) return;
-      for (const type of ["Credit", "Debit"]) {
-        makeSeries(`${c} (${type})`, "ln-cat", CHART_COLORS[i % CHART_COLORS.length], type === "Debit", (t) => t.category === c && t.type === type);
-      }
-    });
+    const vals = new Array(buckets.length).fill(0);
+    let used = 0;
+    for (const t of list) {
+      if (chartOff.has(t.category)) continue;
+      vals[index.get(t.date.slice(0, len))] += t.type === "Credit" ? t.amount : -t.amount;
+      used++;
+    }
+    const on = allCats.length - chartOff.size;
+    const item = el("span", "legend-item");
+    item.append(el("i", "sw ln-net"), document.createTextNode(`Net (credits − debits) · ${on} of ${allCats.length} categories`));
+    legend.append(item);
+    if (!used) { box.append(el("p", "empty", "No categories selected.")); return; }
 
-    const W = 600, H = 300, L = 46, R = 16, T = 12, B = 30;
+    const W = 600, H = 300, L = 50, R = 16, T = 12, B = 30;
     const pw = W - L - R, ph = H - T - B;
-    const rawMax = Math.max(1, ...series.flatMap((s) => s.vals));
-    const step = niceStep(rawMax / 4);
-    const top = step * Math.ceil(rawMax / step);
+    const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+    const step = niceStep((hi - lo || 1) / 4);
+    const yMin = step * Math.floor(lo / step), yMax = Math.max(step * Math.ceil(hi / step), yMin + step);
     const n = buckets.length;
     const X = (i) => (n === 1 ? L + pw / 2 : L + (i * pw) / (n - 1));
-    const Y = (v) => T + ph - (v / top) * ph;
+    const Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of credits and debits" }, "chart-svg");
-    for (let v = 0; v <= top + 1e-9; v += step) {
-      svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, "grid"));
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of net amount (credits minus debits)" }, "chart-svg");
+    for (let v = yMin; v <= yMax + step / 1000; v += step) {
+      svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, Math.abs(v) < step / 1000 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
       t.textContent = shortNum(v);
       svg.append(t);
@@ -668,31 +666,16 @@
       t.textContent = b.label;
       svg.append(t);
     });
-    for (const s of series) {
-      const path = svgEl("path", { d: s.vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ") }, `ln ${s.cls}`);
-      if (s.color) path.style.stroke = s.color;
-      if (s.dash) path.setAttribute("stroke-dasharray", "6 4");
-      svg.append(path);
-      s.vals.forEach((v, i) => {
-        const dot = svgEl("circle", { cx: X(i), cy: Y(v), r: n > 40 ? 0 : 3 }, `dot ${s.cls}`);
-        if (s.color) dot.style.fill = s.color;
-        const tip = svgEl("title");
-        tip.textContent = `${s.name} · ${buckets[i].label}: ${fmt.format(v)}`;
-        dot.append(tip);
-        svg.append(dot);
-      });
-    }
+    svg.append(svgEl("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ") }, "ln ln-net"));
+    vals.forEach((v, i) => {
+      const dot = svgEl("circle", { cx: X(i), cy: Y(v), r: n > 40 ? 0 : 3.5 }, `dot ${v >= 0 ? "ln-credit" : "ln-debit"}`);
+      const tip = svgEl("title");
+      tip.textContent = `${buckets[i].label}: net ${fmt.format(v)}`;
+      dot.append(tip);
+      svg.append(dot);
+    });
     box.append(svg);
-
-    for (const s of series) {
-      const item = el("span", "legend-item");
-      const sw = el("i", `sw ${s.cls}${s.dash ? " dashed" : ""}`);
-      if (s.color) sw.style.setProperty("--sw", s.color);
-      item.append(sw, document.createTextNode(s.name));
-      legend.append(item);
-    }
   };
-
   const render = () => {
     const list = filtered();
     renderCards(list);
