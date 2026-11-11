@@ -35,7 +35,7 @@ Enforcement is done by **Google Drive**, not by the page: every save is an authe
 1. Go to <https://console.cloud.google.com/>, create a project (e.g. "SGRBC Finance").
 2. **APIs & Services → Library**: enable **Google Drive API** and **Google Picker API**.
 3. **APIs & Services → OAuth consent screen**: choose *External* (or *Internal* for a Google Workspace org), add the scope `.../auth/drive.file`, and add your editors/viewers as **Test users** while the app is in "Testing" (or publish the app).
-4. **Credentials → Create credentials → OAuth client ID → Web application**. Under **Authorized JavaScript origins** add *only* the https address where you host the app (e.g. `https://yourname.github.io`). Copy the **Client ID**.
+4. **Credentials → Create credentials → OAuth client ID → Web application**. Under **Authorized JavaScript origins** add *only* the https address where you host the app (e.g. `https://yourname.github.io`). Under **Authorized redirect URIs** add the full address of the app page (e.g. `https://yourname.github.io/SGRBC/index.html`); the installed home-screen app signs in by redirect and needs it. Copy the **Client ID**.
 5. **Credentials → Create credentials → API key**. Restrict it: *Application restrictions → Websites* = your https address, *API restrictions* = Google Drive API + Google Picker API. Copy the key.
 6. Note your **project number** (Cloud Console → Dashboard). It is also the digits before the `-` in the client ID.
 7. Edit `app/config.js` and fill in `GOOGLE_CLIENT_ID`, `GOOGLE_API_KEY`, `GOOGLE_APP_ID`.

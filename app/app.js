@@ -139,8 +139,40 @@
   };
   const authReady = (async () => { if (driveMode) { try { await initAuth(); } catch { /* shown on sign-in */ } } })();
 
+  // Installed app (home-screen PWA): the Google popup cannot report back from the Custom Tab Android opens, so sign-in
+  // uses a full-page redirect instead (see signInRedirect / takeRedirectToken). Silent re-auth is not possible there.
+  const STATE_KEY = "sgrbc-oauth-state";
+  const redirectUri = () => new URL("index.html", location.href).href;
+  const signInRedirect = () => {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const st = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    try { localStorage.setItem(STATE_KEY, st); } catch { toast("Sign-in needs browser storage, which is blocked."); return; }
+    const p = new URLSearchParams({
+      client_id: CFG.GOOGLE_CLIENT_ID, redirect_uri: redirectUri(), response_type: "token", scope: SCOPE,
+      state: st, include_granted_scopes: "true", prompt: "select_account",
+    });
+    if (session.email) p.set("login_hint", session.email);
+    location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${p}`);
+  };
+  // Reads the token Google put in the URL fragment after the redirect. Returns true when a token was accepted.
+  const takeRedirectToken = () => {
+    const h = new URLSearchParams(location.hash.slice(1));
+    if (!h.has("access_token") && !h.has("error")) return false;
+    history.replaceState(null, "", location.pathname + location.search);
+    let expected = "";
+    try { expected = localStorage.getItem(STATE_KEY) || ""; localStorage.removeItem(STATE_KEY); } catch { /* ignore */ }
+    const token = h.get("access_token");
+    const scopes = (h.get("scope") || "").split(" ");
+    if (!token || !expected || h.get("state") !== expected || !scopes.includes(SCOPE)) { toast("Sign-in was cancelled or failed."); return false; }
+    session.token = token;
+    session.expires = Date.now() + (Number(h.get("expires_in")) || 3600) * 1000;
+    return true;
+  };
+
   const getToken = async () => {
     if (hasToken()) return session.token;
+    if (isInstalled()) throw new Error("auth");
     await authReady;
     if (!tokenClient) throw new Error("auth");
     return new Promise((resolve, reject) => {
@@ -306,6 +338,7 @@
   };
 
   const signIn = async () => {
+    if (isInstalled()) { signInRedirect(); return; }
     try {
       await getToken();
       await fetchUser();
@@ -892,6 +925,8 @@
       fullRender(); updateUi();
       return;
     }
+    // Returning from the Google sign-in redirect (installed app): the token arrives in the URL fragment
+    const signedInByRedirect = takeRedirectToken();
     // Drive mode: pick up the shared file id from a link (#f=ID), earlier use, or config.js
     const fromHash = new URLSearchParams(location.hash.slice(1)).get("f");
     if (validFileId(fromHash)) { setFileId(fromHash); history.replaceState(null, "", location.pathname + location.search); }
@@ -903,6 +938,8 @@
     // Nothing is loaded or shown until the user signs in and Google confirms access. Remove any copy cached by older versions.
     try { localStorage.removeItem(CACHE_KEY); } catch { /* ignore */ }
     fullRender(); updateUi();
+    if (signedInByRedirect) { try { await fetchUser(); } catch { /* refresh() shows the state */ } }
+
     await refresh();
     const autoRefresh = () => { if (hasToken() && document.visibilityState === "visible" && !$("dlg").open && !$("shareDlg").open) refresh(); };
     setInterval(autoRefresh, 60000);
