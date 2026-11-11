@@ -587,23 +587,24 @@
     const f = x / p;
     return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
   };
-  // Buckets: one point per day when the data is within a single month, otherwise one per month.
-  const chartBuckets = (list) => {
-    const months = new Set(list.map((t) => t.date.slice(0, 7)));
-    const daily = months.size <= 1;
+  // One point per day (when the filtered data is within a single month) or per month, and only for days/months that
+  // actually have transactions. `x` is the real position in time, so gaps between points stay honest.
+  const chartPoints = (list, selected) => {
+    const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
     const len = daily ? 10 : 7;
-    const keys = list.map((t) => t.date.slice(0, len)).sort();
-    const out = [];
-    let [y, m, d] = keys[0].split("-").map(Number);
-    const last = keys[keys.length - 1];
-    for (let i = 0; i < 4000; i++) {   // continuous run from first to last bucket, with a safety limit
-      const key = daily ? `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` : `${y}-${String(m).padStart(2, "0")}`;
-      out.push({ key, label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}` });
-      if (key >= last) break;
-      if (daily) { const nx = new Date(Date.UTC(y, m - 1, d + 1)); y = nx.getUTCFullYear(); m = nx.getUTCMonth() + 1; d = nx.getUTCDate(); }
-      else { m += 1; if (m > 12) { m = 1; y += 1; } }
+    const sums = new Map();
+    for (const t of selected) {
+      const k = t.date.slice(0, len);
+      sums.set(k, (sums.get(k) || 0) + (t.type === "Credit" ? t.amount : -t.amount));
     }
-    return { daily, len, buckets: out };
+    return [...sums].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
+      const [y, m, d] = k.split("-").map(Number);
+      return {
+        v,
+        x: daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1,
+        label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}`,
+      };
+    });
   };
 
   const renderChart = (list) => {
@@ -627,29 +628,23 @@
     legend.replaceChildren();
     if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
-    // The x-axis comes from all filtered data (so it stays put while categories are toggled); the values only from selected categories.
-    const { len, buckets } = chartBuckets(list);
-    const index = new Map(buckets.map((b, i) => [b.key, i]));
-    const vals = new Array(buckets.length).fill(0);
-    let used = 0;
-    for (const t of list) {
-      if (chartOff.has(t.category)) continue;
-      vals[index.get(t.date.slice(0, len))] += t.type === "Credit" ? t.amount : -t.amount;
-      used++;
-    }
+    const pts = chartPoints(list, list.filter((t) => !chartOff.has(t.category)));
     const on = allCats.length - chartOff.size;
     const item = el("span", "legend-item");
     item.append(el("i", "sw ln-net"), document.createTextNode(`Net (credits − debits) · ${on} of ${allCats.length} categories`));
     legend.append(item);
-    if (!used) { box.append(el("p", "empty", "No categories selected.")); return; }
+    if (!pts.length) { box.append(el("p", "empty", "No categories selected.")); return; }
 
     const W = 600, H = 300, L = 50, R = 16, T = 12, B = 30;
     const pw = W - L - R, ph = H - T - B;
+    const vals = pts.map((p) => p.v);
     const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
     const step = niceStep((hi - lo || 1) / 4);
     const yMin = step * Math.floor(lo / step), yMax = Math.max(step * Math.ceil(hi / step), yMin + step);
-    const n = buckets.length;
-    const X = (i) => (n === 1 ? L + pw / 2 : L + (i * pw) / (n - 1));
+    const n = pts.length;
+    const x0 = pts[0].x, span = pts[n - 1].x - x0;
+    const inset = n > 1 ? 14 : 0;   // keeps the first and last dots and labels inside the frame
+    const X = (p) => (span === 0 ? L + pw / 2 : L + inset + ((p.x - x0) / span) * (pw - 2 * inset));
     const Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of net amount (credits minus debits)" }, "chart-svg");
@@ -659,21 +654,23 @@
       t.textContent = shortNum(v);
       svg.append(t);
     }
-    const stride = Math.ceil(n / 6);
-    buckets.forEach((b, i) => {
-      if (i % stride) return;
-      const t = svgEl("text", { x: X(i), y: H - 10, "text-anchor": "middle" });
-      t.textContent = b.label;
+    // Date labels sit under the points; one is skipped when it would overlap the previous one.
+    let lastLabelX = -1e9;
+    for (const p of pts) {
+      if (X(p) - lastLabelX < 52) continue;
+      lastLabelX = X(p);
+      const t = svgEl("text", { x: X(p), y: H - 10, "text-anchor": "middle" });
+      t.textContent = p.label;
       svg.append(t);
-    });
-    svg.append(svgEl("path", { d: vals.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ") }, "ln ln-net"));
-    vals.forEach((v, i) => {
-      const dot = svgEl("circle", { cx: X(i), cy: Y(v), r: n > 40 ? 0 : 3.5 }, `dot ${v >= 0 ? "ln-credit" : "ln-debit"}`);
+    }
+    svg.append(svgEl("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${X(p).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(" ") }, "ln ln-net"));
+    for (const p of pts) {
+      const dot = svgEl("circle", { cx: X(p), cy: Y(p.v), r: n > 60 ? 2.5 : 4 }, `dot ${p.v >= 0 ? "ln-credit" : "ln-debit"}`);
       const tip = svgEl("title");
-      tip.textContent = `${buckets[i].label}: net ${fmt.format(v)}`;
+      tip.textContent = `${p.label}: net ${fmt.format(p.v)}`;
       dot.append(tip);
       svg.append(dot);
-    });
+    }
     box.append(svg);
   };
   const render = () => {
