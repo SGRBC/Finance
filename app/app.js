@@ -756,10 +756,69 @@
     if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // neutralise spreadsheet formula injection
     return `"${s.replace(/"/g, '""')}"`;
   };
+  // Minimal ZIP writer (stored, no compression: the attachments are already JPEG).
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+    return t;
+  })();
+  const crc32 = (bytes) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const makeZip = (files) => {   // files: [{ name, data: Uint8Array }]
+    const enc = new TextEncoder();
+    const d = new Date();
+    const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const dosDate = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    const header = (size, fill) => { const b = new DataView(new ArrayBuffer(size)); fill(b); return new Uint8Array(b.buffer); };
+    for (const f of files) {
+      const name = enc.encode(f.name);
+      const crc = crc32(f.data);
+      const local = header(30, (v) => {
+        v.setUint32(0, 0x04034b50, true); v.setUint16(4, 20, true); v.setUint16(6, 0x0800, true); v.setUint16(8, 0, true);
+        v.setUint16(10, dosTime, true); v.setUint16(12, dosDate, true); v.setUint32(14, crc, true);
+        v.setUint32(18, f.data.length, true); v.setUint32(22, f.data.length, true); v.setUint16(26, name.length, true); v.setUint16(28, 0, true);
+      });
+      central.push(header(46, (v) => {
+        v.setUint32(0, 0x02014b50, true); v.setUint16(4, 20, true); v.setUint16(6, 20, true); v.setUint16(8, 0x0800, true); v.setUint16(10, 0, true);
+        v.setUint16(12, dosTime, true); v.setUint16(14, dosDate, true); v.setUint32(16, crc, true);
+        v.setUint32(20, f.data.length, true); v.setUint32(24, f.data.length, true); v.setUint16(28, name.length, true);
+        v.setUint32(42, offset, true);
+      }), name);
+      parts.push(local, name, f.data);
+      offset += local.length + name.length + f.data.length;
+    }
+    const cdSize = central.reduce((n, p) => n + p.length, 0);
+    const end = header(22, (v) => {
+      v.setUint32(0, 0x06054b50, true); v.setUint16(8, files.length, true); v.setUint16(10, files.length, true);
+      v.setUint32(12, cdSize, true); v.setUint32(16, offset, true);
+    });
+    return [...parts, ...central, end];
+  };
+  const dataUrlBytes = (url) => Uint8Array.from(atob(url.slice(url.indexOf(",") + 1)), (ch) => ch.charCodeAt(0));
+
+  // Plain CSV when no row has a photo. Otherwise a ZIP: the CSV plus an images/ folder, linked by the Attachment column.
   const exportCsv = () => {
-    const rows = [["Date", "Type", "Category", "Amount", "Description"]];
-    for (const t of filtered()) rows.push([t.date.replace("T", " "), t.type, t.category, t.amount, t.description]);
-    download("sgrbc-finance.csv", "text/csv;charset=utf-8", "\ufeff" + rows.map((r) => r.map(csvCell).join(",")).join("\r\n"));
+    const rows = [["Date", "Type", "Category", "Amount", "Description", "Attachment"]];
+    const images = [];
+    for (const t of filtered()) {
+      let file = "";
+      if (t.attachment) {
+        file = `images/${String(images.length + 1).padStart(3, "0")}_${t.date.replace(/[T:]/g, "-")}.jpg`;
+        images.push({ name: file, data: dataUrlBytes(t.attachment) });
+      }
+      rows.push([t.date.replace("T", " "), t.type, t.category, t.amount, t.description, file]);
+    }
+    const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
+    if (!images.length) { download("sgrbc-finance.csv", "text/csv;charset=utf-8", csv); return; }
+    const files = [{ name: "sgrbc-finance.csv", data: new TextEncoder().encode(csv) }, ...images];
+    download("sgrbc-finance.zip", "application/zip", new Blob(makeZip(files)));
+    toast(`Exported ${images.length} image${images.length === 1 ? "" : "s"} with the CSV (zip file)`);
   };
   const exportJson = () => download("sgrbc-finance-backup.json", "application/json", JSON.stringify(state));
   const importJson = async (file) => {
@@ -802,7 +861,7 @@
       steps = ["Tap the Share button (a square with an arrow pointing up) in the browser toolbar.", "Scroll down and tap “Add to Home Screen”.", "Tap “Add”. The SGRBC Finance icon now appears on your home screen."];
     } else if (p.android && p.firefox) {
       intro = "Firefox on Android can install this app from its menu.";
-      steps = ["Tap the menu (⋮) in Firefox.", "Tap “Install”.", "Confirm with “Add”. The icon appears on your home screen."];
+      steps = ["Tap the menu (⋮) in Firefox.", "Tap “... More”.", "Tap “Add app to Home screen”.", "Confirm with “Add”. The icon appears on your home screen."];
     } else if (p.android) {
       intro = "Your browser did not offer the install prompt automatically, but you can still install from its menu.";
       steps = ["Tap the menu (⋮) in the top-right corner.", "Tap “Install app” (or “Add to Home screen”).", "Confirm with “Install”. The icon appears on your home screen."];
