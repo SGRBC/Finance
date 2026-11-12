@@ -503,18 +503,19 @@
     const root = $("list");
     root.replaceChildren();
     $("empty").hidden = list.length > 0;
-    let lastDay = "";
     for (const t of list.slice(0, shown)) {
       const day = t.date.slice(0, 10);
-      if (day !== lastDay) {
-        lastDay = day;
-        const dt = new Date(`${day}T00:00:00`);
-        root.append(el("div", "day", dt.toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" })));
-      }
+      const dt = new Date(`${day}T00:00:00`);
       const row = el("button", `tx ${t.type}`);
       row.type = "button";
       row.dataset.id = t.id;
       row.classList.toggle("ro", !canEdit());
+      row.title = dt.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+      const when = el("span", "when");
+      when.append(
+        el("span", "d", dt.toLocaleDateString(undefined, { month: "short", day: "numeric" })),
+        el("span", "y", `${dt.toLocaleDateString(undefined, { weekday: "short" })} ${dt.getFullYear()}`));
+      row.append(when);
       const main = el("span", "main");
       main.append(el("span", "desc", t.description || t.category), el("span", "meta", `${t.category} · ${t.date.slice(11)}`));
       if (t.attachment) {
@@ -623,6 +624,16 @@
     });
   };
 
+  // Width (in chart units) needed so that a label `labelW` wide can sit at every point without touching its neighbour.
+  // Points are placed by real time, so the closest pair of points decides. Wider than the screen => the box scrolls sideways.
+  const chartWidth = (xs, labelW, sides) => {
+    const u = [...new Set(xs)].sort((a, b) => a - b);
+    if (u.length < 2) return 600;
+    let minD = Infinity;
+    for (let i = 1; i < u.length; i++) minD = Math.min(minD, u[i] - u[i - 1]);
+    return Math.max(600, Math.ceil((labelW * (u[u.length - 1] - u[0])) / minD + labelW + 8 + sides));
+  };
+
   const renderChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
@@ -632,11 +643,11 @@
       const b = el("button", "chip", c);
       b.type = "button";
       b.setAttribute("aria-pressed", chartOff.has(c) ? "false" : "true");
-      b.addEventListener("click", () => { if (chartOff.has(c)) chartOff.delete(c); else chartOff.add(c); renderChart(list); });
+      b.addEventListener("click", () => { if (chartOff.has(c)) chartOff.delete(c); else chartOff.add(c); renderChart(list); renderCategoryChart(list); });
       chips.append(b);
     }
-    $("chartAll").onclick = () => { chartOff.clear(); renderChart(list); };
-    $("chartNone").onclick = () => { allCats.forEach((c) => chartOff.add(c)); renderChart(list); };
+    $("chartAll").onclick = () => { chartOff.clear(); renderChart(list); renderCategoryChart(list); };
+    $("chartNone").onclick = () => { allCats.forEach((c) => chartOff.add(c)); renderChart(list); renderCategoryChart(list); };
 
     const box = $("chart");
     const legend = $("chartLegend");
@@ -651,30 +662,30 @@
     legend.append(item);
     if (!pts.length) { box.append(el("p", "empty", "No categories selected.")); return; }
 
-    const W = 600, H = 300, L = 50, R = 16, T = 12, B = 30;
-    const pw = W - L - R, ph = H - T - B;
     const vals = pts.map((p) => p.v);
+    const labelW = Math.max(56, ...vals.map((v) => amountFmt.format(v).length * 5.6 + 8));
+    const H = 300, L = 50, R = 16, T = 12, B = 30;
+    const W = chartWidth(pts.map((p) => p.x), labelW, L + R);   // wide enough for every amount to be written without overlap
+    const pw = W - L - R, ph = H - T - B;
     const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
     const step = niceStep((hi - lo || 1) / 4);
     const yMin = step * Math.floor(lo / step), yMax = Math.max(step * Math.ceil(hi / step), yMin + step);
     const n = pts.length;
     const x0 = pts[0].x, span = pts[n - 1].x - x0;
-    const inset = n > 1 ? 14 : 0;   // keeps the first and last dots and labels inside the frame
+    const inset = n > 1 ? labelW / 2 + 4 : 0;   // keeps the first and last dots and labels inside the frame
     const X = (p) => (span === 0 ? L + pw / 2 : L + inset + ((p.x - x0) / span) * (pw - 2 * inset));
     const Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of running net balance (credits minus debits)" }, "chart-svg");
+    if (W > 600) svg.style.width = `${W}px`;
     for (let v = yMin; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, Math.abs(v) < step / 1000 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
       t.textContent = shortNum(v);
       svg.append(t);
     }
-    // Date labels sit under the points; one is skipped when it would overlap the previous one.
-    let lastLabelX = -1e9;
+    // Date labels sit under every point.
     for (const p of pts) {
-      if (X(p) - lastLabelX < 52) continue;
-      lastLabelX = X(p);
       const t = svgEl("text", { x: X(p), y: H - 10, "text-anchor": "middle" });
       t.textContent = p.label;
       svg.append(t);
@@ -687,20 +698,117 @@
       dot.append(tip);
       svg.append(dot);
     }
-    // The balance written next to every dot (above it, or below when there is no room above). A value is left out only
-    // when it would sit on top of the previous one; it is still available by hovering / long-pressing the dot.
-    let lastEnd = -1e9;
-    pts.forEach((p, i) => {
-      const txt = amountFmt.format(p.v);
-      const w = txt.length * 5.6 + 4;
-      const cx = Math.min(Math.max(X(p), L + w / 2), W - R - w / 2);
-      if (cx - w / 2 < lastEnd + 2 && i !== n - 1) return;
-      lastEnd = cx + w / 2;
+    // The balance written next to every dot (above it, or below when there is no room above).
+    for (const p of pts) {
       const above = Y(p.v) - 10 >= T + 6;
-      const t = svgEl("text", { x: cx, y: above ? Y(p.v) - 9 : Y(p.v) + 17, "text-anchor": "middle" }, `val ${p.v >= 0 ? "pos" : "neg"}`);
-      t.textContent = txt;
+      const t = svgEl("text", { x: X(p), y: above ? Y(p.v) - 9 : Y(p.v) + 17, "text-anchor": "middle" }, `val ${p.v >= 0 ? "pos" : "neg"}`);
+      t.textContent = amountFmt.format(p.v);
       svg.append(t);
-    });
+    }
+    box.append(svg);
+  };
+
+  // Second chart: not a net. One line per category showing the amount of that category in each day/month, so a rising or
+  // falling trend is visible per category. Days/months where a selected category has no entries plot as 0.
+  const renderCategoryChart = (list) => {
+    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
+    const box = $("chartByCat");
+    const legend = $("chartByCatLegend");
+    box.replaceChildren();
+    legend.replaceChildren();
+    if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
+
+    const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
+    const len = daily ? 10 : 7;
+    const selected = list.filter((t) => !chartOff.has(t.category));
+    const byCat = new Map();   // category -> Map(period -> amount)
+    const periods = new Set();
+    for (const t of selected) {
+      const k = t.date.slice(0, len);
+      periods.add(k);
+      if (!byCat.has(t.category)) byCat.set(t.category, new Map());
+      const m = byCat.get(t.category);
+      m.set(k, (m.get(k) || 0) + t.amount);
+    }
+    if (!periods.size) { box.append(el("p", "empty", "No categories selected.")); return; }
+
+    const keys = [...periods].sort();
+    const pos = (k) => {
+      const [y, m, d] = k.split("-").map(Number);
+      return daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1;
+    };
+    const labelOf = (k) => {
+      const [y, m, d] = k.split("-").map(Number);
+      return daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}`;
+    };
+    const cats = allCats.filter((c) => byCat.has(c));
+    const colorOf = (c) => CHART_COLORS[allCats.indexOf(c) % CHART_COLORS.length];
+    const dashOf = (c) => (allCats.indexOf(c) >= CHART_COLORS.length ? "6 4" : null);
+    for (const c of cats) {
+      const item = el("span", "legend-item");
+      const sw = el("i", "sw");
+      sw.style.borderTopColor = colorOf(c);
+      item.append(sw, document.createTextNode(c));
+      legend.append(item);
+    }
+
+    let hi = 0, maxLen = 0;
+    for (const m of byCat.values()) for (const v of m.values()) { hi = Math.max(hi, v); maxLen = Math.max(maxLen, amountFmt.format(v).length); }
+    const labelW = Math.max(56, maxLen * 5.6 + 8);
+    const H = 300, L = 50, R = 16, T = 12, B = 30;
+    const W = chartWidth(keys.map(pos), labelW, L + R);   // wide enough for every amount to be written without overlap
+    const pw = W - L - R, ph = H - T - B;
+    const step = niceStep((hi || 1) / 4);
+    const yMax = Math.max(step * Math.ceil(hi / step), step);
+    const n = keys.length;
+    const x0 = pos(keys[0]), span = pos(keys[n - 1]) - x0;
+    const inset = n > 1 ? labelW / 2 + 4 : 0;
+    const X = (k) => (span === 0 ? L + pw / 2 : L + inset + ((pos(k) - x0) / span) * (pw - 2 * inset));
+    const Y = (v) => T + ph - (v / yMax) * ph;
+
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of the amount per category over time" }, "chart-svg");
+    if (W > 600) svg.style.width = `${W}px`;
+    for (let v = 0; v <= yMax + step / 1000; v += step) {
+      svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, v === 0 ? "grid zero" : "grid"));
+      const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
+      t.textContent = shortNum(v);
+      svg.append(t);
+    }
+    for (const k of keys) {
+      const t = svgEl("text", { x: X(k), y: H - 10, "text-anchor": "middle" });
+      t.textContent = labelOf(k);
+      svg.append(t);
+    }
+    for (const c of cats) {
+      const m = byCat.get(c);
+      const line = svgEl("path", {
+        d: keys.map((k, i) => `${i ? "L" : "M"}${X(k).toFixed(1)} ${Y(m.get(k) || 0).toFixed(1)}`).join(" "),
+        stroke: colorOf(c),
+      }, "ln");
+      if (dashOf(c)) line.setAttribute("stroke-dasharray", dashOf(c));
+      svg.append(line);
+      for (const k of keys) {
+        const v = m.get(k) || 0;
+        const dot = svgEl("circle", { cx: X(k), cy: Y(v), r: n > 60 ? 2.5 : 4, fill: colorOf(c) }, "dot");
+        const tip = svgEl("title");
+        tip.textContent = `${c} · ${labelOf(k)}: ${fmt.format(v)}`;
+        dot.append(tip);
+        svg.append(dot);
+      }
+    }
+    // The amount written next to every real entry, in its category colour. Labels of different categories in the same
+    // period that would land on top of each other are moved apart vertically.
+    for (const k of keys) {
+      const items = cats.filter((c) => byCat.get(c).has(k)).map((c) => ({ c, v: byCat.get(c).get(k), y: Y(byCat.get(c).get(k)) - 9 }));
+      items.sort((a, b) => a.y - b.y);
+      items.forEach((it, i) => {
+        it.y = Math.max(it.y, T + 8, i ? items[i - 1].y + 11 : 0);
+        const t = svgEl("text", { x: X(k), y: it.y, "text-anchor": "middle" }, "val");
+        t.style.fill = colorOf(it.c);
+        t.textContent = amountFmt.format(it.v);
+        svg.append(t);
+      });
+    }
     box.append(svg);
   };
   const render = () => {
@@ -709,6 +817,7 @@
     renderList(list);
     renderSummary(list);
     renderChart(list);
+    renderCategoryChart(list);
   };
   const fullRender = () => { renderFilterOptions(); render(); };
 

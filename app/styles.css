@@ -86,6 +86,9 @@ select, input[type=search], input[type=text], input[type=number], input[type=dat
   width: 100%; text-align: left; margin-bottom: 6px; padding: 10px 14px; min-height: 56px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
 }
+.tx .when { flex: none; width: 58px; text-align: left; line-height: 1.25; }
+.tx .when .d { display: block; font-weight: 600; font-size: 14px; }
+.tx .when .y { display: block; color: var(--muted); font-size: 11px; }
 .tx .main { min-width: 0; }
 .tx .desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tx .meta { display: block; color: var(--muted); font-size: 12px; }
@@ -189,7 +192,8 @@ body.locked main, body.locked .fab { display: none !important; }
 .install-steps li { margin-bottom: 8px; }
 
 /* ---- Charts tab ---- */
-.chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+.chart-box { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; overflow-x: auto; }
+.chart-svg { max-width: none; }
 .chart-svg { display: block; width: 100%; height: auto; }
 .chart-svg text { fill: var(--muted); font-size: 11px; }
 .chart-svg .grid { stroke: var(--border); stroke-width: 1; }
