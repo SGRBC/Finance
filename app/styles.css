@@ -208,6 +208,7 @@ body.locked main, body.locked .fab { display: none !important; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 4px 0; font-size: 12px; color: var(--muted); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }
 .sw { display: inline-block; width: 18px; height: 0; border-top: 3px solid var(--accent); }
+.sw.box { width: 12px; height: 12px; border: 0; border-radius: 3px; }
 .chart-actions { display: flex; gap: 16px; margin: 0 4px 8px; }
 .link-btn { background: none; border: 0; padding: 4px 0; color: var(--accent); font-size: 13px; min-height: 32px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }

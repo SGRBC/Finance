@@ -712,8 +712,8 @@
     box.append(svg);
   };
 
-  // Second chart: not a net. One line per category showing the amount of that category in each day/month, so a rising or
-  // falling trend is visible per category. Days/months where a selected category has no entries plot as 0.
+  // Second chart: not a net. Grouped bars: one group per day/month, one bar per category, so the amount of each category
+  // can be compared period to period. A category with no entries in a period has no bar there.
   const renderCategoryChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     const box = $("chartByCat");
@@ -737,40 +737,36 @@
     if (!periods.size) { box.append(el("p", "empty", "No categories selected.")); return; }
 
     const keys = [...periods].sort();
-    const pos = (k) => {
-      const [y, m, d] = k.split("-").map(Number);
-      return daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1;
-    };
     const labelOf = (k) => {
       const [y, m, d] = k.split("-").map(Number);
       return daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}`;
     };
     const cats = allCats.filter((c) => byCat.has(c));
     const colorOf = (c) => CHART_COLORS[allCats.indexOf(c) % CHART_COLORS.length];
-    const dashOf = (c) => (allCats.indexOf(c) >= CHART_COLORS.length ? "6 4" : null);
     for (const c of cats) {
       const item = el("span", "legend-item");
-      const sw = el("i", "sw");
-      sw.style.borderTopColor = colorOf(c);
+      const sw = el("i", "sw box");
+      sw.style.background = colorOf(c);
       item.append(sw, document.createTextNode(c));
       legend.append(item);
     }
 
     let hi = 0, maxLen = 0;
     for (const m of byCat.values()) for (const v of m.values()) { hi = Math.max(hi, v); maxLen = Math.max(maxLen, amountFmt.format(v).length); }
-    const labelW = Math.max(56, maxLen * 5.6 + 8);
-    const H = 300, L = 50, R = 16, T = 12, B = 30;
-    const W = chartWidth(keys.map(pos), labelW, L + R);   // wide enough for every amount to be written without overlap
-    const pw = W - L - R, ph = H - T - B;
+    // Amounts are written vertically above each bar, so the room above the tallest bar depends on the longest amount.
+    const H = 320, L = 50, R = 16, B = 30;
+    const T = 12 + maxLen * 5.6;
+    const BAR = 16, GAP = 2, GROUP_GAP = 16;
+    const nc = cats.length, n = keys.length;
+    const groupW = Math.max(nc * BAR + (nc - 1) * GAP, 40);
+    const W = Math.max(600, Math.ceil(L + R + n * groupW + (n + 1) * GROUP_GAP));
+    const slot = (W - L - R) / n;
+    const ph = H - T - B;
     const step = niceStep((hi || 1) / 4);
     const yMax = Math.max(step * Math.ceil(hi / step), step);
-    const n = keys.length;
-    const x0 = pos(keys[0]), span = pos(keys[n - 1]) - x0;
-    const inset = n > 1 ? labelW / 2 + 4 : 0;
-    const X = (k) => (span === 0 ? L + pw / 2 : L + inset + ((pos(k) - x0) / span) * (pw - 2 * inset));
     const Y = (v) => T + ph - (v / yMax) * ph;
 
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of the amount per category over time" }, "chart-svg");
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Bar chart of the amount per category over time" }, "chart-svg");
     if (W > 600) svg.style.width = `${W}px`;
     for (let v = 0; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, v === 0 ? "grid zero" : "grid"));
@@ -778,41 +774,28 @@
       t.textContent = shortNum(v);
       svg.append(t);
     }
-    for (const k of keys) {
-      const t = svgEl("text", { x: X(k), y: H - 10, "text-anchor": "middle" });
+    keys.forEach((k, i) => {
+      const cx = L + slot * (i + 0.5);
+      const t = svgEl("text", { x: cx, y: H - 10, "text-anchor": "middle" });
       t.textContent = labelOf(k);
       svg.append(t);
-    }
-    for (const c of cats) {
-      const m = byCat.get(c);
-      const line = svgEl("path", {
-        d: keys.map((k, i) => `${i ? "L" : "M"}${X(k).toFixed(1)} ${Y(m.get(k) || 0).toFixed(1)}`).join(" "),
-        stroke: colorOf(c),
-      }, "ln");
-      if (dashOf(c)) line.setAttribute("stroke-dasharray", dashOf(c));
-      svg.append(line);
-      for (const k of keys) {
-        const v = m.get(k) || 0;
-        const dot = svgEl("circle", { cx: X(k), cy: Y(v), r: n > 60 ? 2.5 : 4, fill: colorOf(c) }, "dot");
+      const x0 = cx - (nc * BAR + (nc - 1) * GAP) / 2;
+      cats.forEach((c, j) => {
+        const v = byCat.get(c).get(k);
+        if (v === undefined) return;
+        const x = x0 + j * (BAR + GAP);
+        const bar = svgEl("rect", { x, y: Y(v), width: BAR, height: Math.max(Y(0) - Y(v), 1), rx: 2, fill: colorOf(c) }, "bar");
         const tip = svgEl("title");
         tip.textContent = `${c} · ${labelOf(k)}: ${fmt.format(v)}`;
-        dot.append(tip);
-        svg.append(dot);
-      }
-    }
-    // The amount written next to every real entry, in its category colour. Labels of different categories in the same
-    // period that would land on top of each other are moved apart vertically.
-    for (const k of keys) {
-      const items = cats.filter((c) => byCat.get(c).has(k)).map((c) => ({ c, v: byCat.get(c).get(k), y: Y(byCat.get(c).get(k)) - 9 }));
-      items.sort((a, b) => a.y - b.y);
-      items.forEach((it, i) => {
-        it.y = Math.max(it.y, T + 8, i ? items[i - 1].y + 11 : 0);
-        const t = svgEl("text", { x: X(k), y: it.y, "text-anchor": "middle" }, "val");
-        t.style.fill = colorOf(it.c);
-        t.textContent = amountFmt.format(it.v);
-        svg.append(t);
+        bar.append(tip);
+        svg.append(bar);
+        const lx = x + BAR / 2 + 3.5, ly = Y(v) - 4;
+        const txt = svgEl("text", { x: lx, y: ly, transform: `rotate(-90 ${lx} ${ly})`, "text-anchor": "start" }, "val");
+        txt.style.fill = colorOf(c);
+        txt.textContent = amountFmt.format(v);
+        svg.append(txt);
       });
-    }
+    });
     box.append(svg);
   };
   const render = () => {
