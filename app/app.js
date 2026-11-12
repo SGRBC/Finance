@@ -753,10 +753,9 @@
 
     let hi = 0, maxLen = 0;
     for (const m of byCat.values()) for (const v of m.values()) { hi = Math.max(hi, v); maxLen = Math.max(maxLen, amountFmt.format(v).length); }
-    // Amounts are written vertically above each bar, so the room above the tallest bar depends on the longest amount.
-    const H = 320, L = 50, R = 16, B = 30;
-    const T = 12 + maxLen * 5.6;
-    const BAR = 16, GAP = 2, GROUP_GAP = 16;
+    // Amounts are written horizontally above each bar, so every bar is as wide as the longest amount.
+    const H = 300, L = 50, R = 16, B = 30, T = 24;
+    const BAR = Math.max(16, Math.ceil(maxLen * 5.6 + 6)), GAP = 2, GROUP_GAP = 16;
     const nc = cats.length, n = keys.length;
     const groupW = Math.max(nc * BAR + (nc - 1) * GAP, 40);
     const W = Math.max(600, Math.ceil(L + R + n * groupW + (n + 1) * GROUP_GAP));
@@ -789,8 +788,7 @@
         tip.textContent = `${c} · ${labelOf(k)}: ${fmt.format(v)}`;
         bar.append(tip);
         svg.append(bar);
-        const lx = x + BAR / 2 + 3.5, ly = Y(v) - 4;
-        const txt = svgEl("text", { x: lx, y: ly, transform: `rotate(-90 ${lx} ${ly})`, "text-anchor": "start" }, "val");
+        const txt = svgEl("text", { x: x + BAR / 2, y: Y(v) - 5, "text-anchor": "middle" }, "val");
         txt.style.fill = colorOf(c);
         txt.textContent = amountFmt.format(v);
         svg.append(txt);
