@@ -9,7 +9,7 @@
   const CACHE_KEY = "sgrbc-finance-cache-v1";    // last copy downloaded from Google Drive (for fast/offline viewing)
   const FILE_KEY = "sgrbc-finance-file-id";
   const PAGE = 50;
-  const DEBIT_CATEGORIES = ["Pastoral Colabor", "Benevolence", "Utilities", "Recurring", "Special"];
+  const DEBIT_CATEGORIES = ["Pastoral Colabor", "Benevolence", "Utilities", "Recurring", "Special", "Renovation"];
   // Retired categories: old entries keep them (and still count in the totals), but they are not offered in the Category filter or the chart options.
   const HIDDEN_CATEGORIES = new Set(["Custodian", "Honorarium", "Representation"]);
   const listedCategory = (c) => !HIDDEN_CATEGORIES.has(c);
@@ -503,8 +503,12 @@
     const root = $("list");
     root.replaceChildren();
     $("empty").hidden = list.length > 0;
+    let lastMonth = "";
     for (const t of list.slice(0, shown)) {
       const day = t.date.slice(0, 10);
+      const month = day.slice(0, 7);
+      if (lastMonth && month !== lastMonth) root.append(el("div", "month-sep"));
+      lastMonth = month;
       const dt = new Date(`${day}T00:00:00`);
       const row = el("button", `tx ${t.type}`);
       row.type = "button";

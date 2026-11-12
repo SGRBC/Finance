@@ -86,6 +86,8 @@ select, input[type=search], input[type=text], input[type=number], input[type=dat
   width: 100%; text-align: left; margin-bottom: 6px; padding: 10px 14px; min-height: 56px;
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
 }
+.month-sep { height: 0; margin: 14px 0 12px; border-top: 5px solid var(--muted); border-radius: 3px; }
+
 .tx .when { flex: none; width: 58px; text-align: left; line-height: 1.25; }
 .tx .when .d { display: block; font-weight: 600; font-size: 14px; }
 .tx .when .y { display: block; color: var(--muted); font-size: 11px; }
