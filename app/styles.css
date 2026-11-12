@@ -113,6 +113,9 @@ th, td { padding: 8px 10px; text-align: right; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 tbody tr { border-top: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; }
+/* Month table columns: 1 Month, 2 Credits, 3 Debits, 4 Net, 5 Running net */
+#monthTable[data-type="Credit"] :is(th, td):is(:nth-child(3), :nth-child(4)) { display: none; }
+#monthTable[data-type="Debit"] :is(th, td):is(:nth-child(2), :nth-child(4)) { display: none; }
 .pos { color: var(--credit); }
 .neg { color: var(--debit); }
 

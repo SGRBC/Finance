@@ -566,6 +566,7 @@
     }
     const body = $("byMonth");
     body.replaceChildren();
+    $("monthTable").dataset.type = filters.type;   // CSS hides the columns that do not apply to a Credit / Debit view
     // Running net accumulates from the oldest month in the chosen range; rows are shown newest first.
     let running = 0;
     const rowsAsc = [...months].sort((a, b) => a[0].localeCompare(b[0])).map(([m, e]) => {
