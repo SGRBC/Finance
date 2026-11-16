@@ -51,7 +51,7 @@ button { cursor: pointer; }
 }
 .menu[hidden] { display: none; }
 .menu-group { display: flex; flex-direction: column; }
-.menu-group:not(:has(> button:not([hidden]))) { display: none; }   /* a group with nothing to show disappears with its divider */
+.menu-group:not(.menu-qr):not(:has(> button:not([hidden]))) { display: none; }   /* a group with nothing to show disappears with its divider */
 .menu-group + .menu-group { border-top: 4px solid var(--border); }   /* thicker divider between the two groups */
 .menu button { background: none; border: 0; text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .menu-group button:last-child { border-bottom: 0; }
@@ -243,3 +243,8 @@ body.locked main, body.locked .fab { display: none !important; }
   .topbar { flex-wrap: wrap; }
   .api-status { order: 5; flex-basis: 100%; margin: 6px 0 0; }   /* own row under the title on phones so it is never squeezed out */
 }
+
+/* QR code group at the end of the menu: always on a white tile so it scans in dark mode too */
+.menu-qr { align-items: center; gap: 8px; padding: 14px 16px; text-align: center; font-size: 12px; color: var(--muted); }
+.menu-qr img { width: 160px; height: 160px; background: #fff; border: 8px solid #fff; border-radius: 6px; box-sizing: content-box; }
+.menu-qr a { color: var(--accent); word-break: break-all; }
