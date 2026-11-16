@@ -446,12 +446,12 @@
   };
 
   // ---------- filtering & totals ----------
-  const filtered = () => {
+  const filtered = (ignoreYearMonth = false) => {
     const q = filters.search.trim().toLowerCase();
     return state.transactions
       .filter((t) =>
-        (!filters.year || t.date.startsWith(filters.year)) &&
-        (!filters.month || t.date.slice(5, 7) === filters.month) &&
+        (ignoreYearMonth || !filters.year || t.date.startsWith(filters.year)) &&
+        (ignoreYearMonth || !filters.month || t.date.slice(5, 7) === filters.month) &&
         (!filters.category || t.category === filters.category) &&
         (!filters.type || t.type === filters.type) &&
         (!q || t.description.toLowerCase().includes(q) || t.category.toLowerCase().includes(q)))
@@ -483,7 +483,10 @@
     mSel.replaceChildren(new Option("All months", ""), ...MONTHS.map((m, i) => new Option(m, String(i + 1).padStart(2, "0"))));
     syncMonthSelect();
 
-    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
+    // Offering and Others (the credit categories) are pinned to the top of the dropdown; the rest stay alphabetical.
+    const PINNED = ["Offering", "Others"];
+    const rank = (c) => (PINNED.includes(c) ? PINNED.indexOf(c) : PINNED.length);
+    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     const cSel = $("fCategory");
     // Label each category with its type, as in the Summary tab. A category used for both types (e.g. Others) shows both.
     const typeLabel = (c) => [state.categories.Credit.includes(c) && "Credit", state.categories.Debit.includes(c) && "Debit"].filter(Boolean).join("/");
@@ -611,7 +614,7 @@
   // One point per day (when the filtered data is within a single month) or per month, and only for days/months that
   // actually have transactions. `x` is the real position in time, so gaps between points stay honest.
   // `v` is the running net balance up to and including that day/month; `day` is that day's own net.
-  const chartPoints = (list, selected) => {
+  const chartPoints = (list, selected, opening = 0) => {
     const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
     const len = daily ? 10 : 7;
     const sums = new Map();
@@ -621,7 +624,7 @@
       sums.set(k, (sums.get(k) || 0) + (t.type === "Credit" ? t.amount : -t.amount));
       if (!lastDay.has(k) || t.date.slice(8, 10) > lastDay.get(k)) lastDay.set(k, t.date.slice(8, 10));
     }
-    let running = 0;
+    let running = opening;   // balance carried in from before the chart's date range (0 when there is no range)
     return [...sums].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
       const [y, m, d] = k.split("-").map(Number);
       running += v;
@@ -664,14 +667,23 @@
     const legend = $("chartLegend");
     box.replaceChildren();
     legend.replaceChildren();
-    if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
+    if (!list.length && !chartRange.from && !chartRange.to) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
-    // Optional date range for this chart only: the balance starts at zero on the first day inside the range.
-    const ranged = list.filter((t) => (!chartRange.from || t.date.slice(0, 10) >= chartRange.from) && (!chartRange.to || t.date.slice(0, 10) <= chartRange.to));
-    $("chartRangeClear").hidden = !chartRange.from && !chartRange.to;
-    if (!ranged.length) { box.append(el("p", "empty", "No transactions in this date range.")); return; }
+    // Optional date range for this chart only. With a range the Year/Month filters are ignored (as if all years and all
+    // months were selected): the balance is the true running balance, i.e. it starts from everything before the range, and
+    // only the points inside the range are drawn.
+    const hasRange = Boolean(chartRange.from || chartRange.to);
+    $("chartRangeClear").hidden = !hasRange;
+    let source = list, opening = 0;
+    if (hasRange) {
+      source = filtered(true);
+      const before = source.filter((t) => chartRange.from && t.date.slice(0, 10) < chartRange.from && !chartOff.has(t.category));
+      opening = before.reduce((s, t) => s + (t.type === "Credit" ? t.amount : -t.amount), 0);
+      source = source.filter((t) => (!chartRange.from || t.date.slice(0, 10) >= chartRange.from) && (!chartRange.to || t.date.slice(0, 10) <= chartRange.to));
+      if (!source.length) { box.append(el("p", "empty", "No transactions in this date range.")); return; }
+    }
 
-    const pts = chartPoints(ranged, ranged.filter((t) => !chartOff.has(t.category)));
+    const pts = chartPoints(source, source.filter((t) => !chartOff.has(t.category)), opening);
     const on = allCats.length - chartOff.size;
     const item = el("span", "legend-item");
     item.append(el("i", "sw ln-net"), document.createTextNode(`Running net balance (credits − debits) · ${on} of ${allCats.length} categories`));
