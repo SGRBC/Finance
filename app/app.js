@@ -27,7 +27,7 @@
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   };
-  let filters = { year: currentMonth().slice(0, 4), month: currentMonth().slice(5, 7), category: "", search: "", type: "" };   // current year + month is the default view ("" = all)
+  let filters = { year: "", month: "", category: "", search: "", type: "" };   // all years + all months is the default view ("" = all)
   let shown = PAGE;
   let editingId = null;
   let formType = "Credit";
@@ -613,9 +613,11 @@
     const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
     const len = daily ? 10 : 7;
     const sums = new Map();
+    const lastDay = new Map();   // month -> day of the month of its latest transaction (used to label monthly points)
     for (const t of selected) {
       const k = t.date.slice(0, len);
       sums.set(k, (sums.get(k) || 0) + (t.type === "Credit" ? t.amount : -t.amount));
+      if (!lastDay.has(k) || t.date.slice(8, 10) > lastDay.get(k)) lastDay.set(k, t.date.slice(8, 10));
     }
     let running = 0;
     return [...sums].sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => {
@@ -624,7 +626,7 @@
       return {
         v: running, day: v,
         x: daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1,
-        label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${String(y).slice(2)}`,
+        label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${Number(lastDay.get(k))} '${String(y).slice(2)}`,
       };
     });
   };
@@ -713,14 +715,99 @@
     box.append(svg);
   };
 
-  // Second chart: not a net. Grouped bars: one group per day/month, one bar per category, so the amount of each category
-  // can be compared period to period. A category with no entries in a period has no bar there.
+  // Second chart: not a net. Two views (catChartMode):
+  //  - "category": grouped bars, one group per day/month, one bar per category.
+  //  - "type": one Credit bar and one Debit bar per day/month, each stacked by category.
+  // A category with no entries in a period has no bar/segment there.
+  let catChartMode = "category";
+  const renderStackedChart = (box, legend, selected, allCats, len, labelOf, colorOf) => {
+    const tot = new Map();   // period -> { Credit: Map(category -> amount), Debit: Map(category -> amount) }
+    for (const t of selected) {
+      const k = t.date.slice(0, len);
+      if (!tot.has(k)) tot.set(k, { Credit: new Map(), Debit: new Map() });
+      const m = tot.get(k)[t.type];
+      m.set(t.category, (m.get(t.category) || 0) + t.amount);
+    }
+    const keys = [...tot.keys()].sort();
+    const sumOf = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+    const used = new Set();
+    let hi = 0, maxLen = 0;
+    for (const s of tot.values()) for (const type of ["Credit", "Debit"]) {
+      const total = sumOf(s[type]);
+      hi = Math.max(hi, total);
+      if (total) maxLen = Math.max(maxLen, amountFmt.format(total).length);
+      for (const [c, v] of s[type]) { used.add(c); maxLen = Math.max(maxLen, amountFmt.format(v).length); }
+    }
+    for (const c of allCats.filter((x) => used.has(x))) {
+      const item = el("span", "legend-item");
+      const sw = el("i", "sw box");
+      sw.style.background = colorOf(c);
+      item.append(sw, document.createTextNode(c));
+      legend.append(item);
+    }
+
+    const H = 310, L = 50, R = 16, B = 44, T = 24;
+    const BAR = Math.max(40, Math.ceil(maxLen * 5.6 + 6)), GAP = 4, GROUP_GAP = 16;
+    const n = keys.length;
+    const groupW = 2 * BAR + GAP;
+    const W = Math.max(600, Math.ceil(L + R + n * groupW + (n + 1) * GROUP_GAP));
+    const slot = (W - L - R) / n;
+    const ph = H - T - B;
+    const step = niceStep((hi || 1) / 4);
+    const yMax = Math.max(step * Math.ceil(hi / step), step);
+    const Y = (v) => T + ph - (v / yMax) * ph;
+
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Stacked bar chart of total credit and total debit per period, split by category" }, "chart-svg");
+    if (W > 600) svg.style.width = `${W}px`;
+    for (let v = 0; v <= yMax + step / 1000; v += step) {
+      svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, v === 0 ? "grid zero" : "grid"));
+      const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
+      t.textContent = shortNum(v);
+      svg.append(t);
+    }
+    keys.forEach((k, i) => {
+      const cx = L + slot * (i + 0.5);
+      const mt = svgEl("text", { x: cx, y: H - 8, "text-anchor": "middle" });
+      mt.textContent = labelOf(k);
+      svg.append(mt);
+      ["Credit", "Debit"].forEach((type, j) => {
+        const x = cx - groupW / 2 + j * (BAR + GAP);
+        const lt = svgEl("text", { x: x + BAR / 2, y: H - 24, "text-anchor": "middle" }, type === "Credit" ? "pos" : "neg");
+        lt.textContent = type;
+        svg.append(lt);
+        const m = tot.get(k)[type];
+        const total = sumOf(m);
+        if (!total) return;
+        let acc = 0;
+        for (const c of allCats.filter((x2) => m.has(x2))) {
+          const v = m.get(c);
+          const yTop = Y(acc + v), yBot = Y(acc);
+          const seg = svgEl("rect", { x, y: yTop, width: BAR, height: Math.max(yBot - yTop, 1), fill: colorOf(c), stroke: "var(--surface)", "stroke-width": 1 }, "bar");
+          const tip = svgEl("title");
+          tip.textContent = `${type} · ${c} · ${labelOf(k)}: ${fmt.format(v)} (total ${fmt.format(total)})`;
+          seg.append(tip);
+          svg.append(seg);
+          if (yBot - yTop >= 13) {
+            const st = svgEl("text", { x: x + BAR / 2, y: (yTop + yBot) / 2 + 3.5, "text-anchor": "middle" }, "seg-val");
+            st.textContent = amountFmt.format(v);
+            svg.append(st);
+          }
+          acc += v;
+        }
+        const tt = svgEl("text", { x: x + BAR / 2, y: Y(total) - 5, "text-anchor": "middle" }, `val ${type === "Credit" ? "pos" : "neg"}`);
+        tt.textContent = amountFmt.format(total);
+        svg.append(tt);
+      });
+    });
+    box.append(svg);
+  };
   const renderCategoryChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     const box = $("chartByCat");
     const legend = $("chartByCatLegend");
     box.replaceChildren();
     legend.replaceChildren();
+    document.querySelectorAll("[data-cmode]").forEach((b) => b.classList.toggle("active", b.dataset.cmode === catChartMode));
     if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
     const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
@@ -744,6 +831,7 @@
     };
     const cats = allCats.filter((c) => byCat.has(c));
     const colorOf = (c) => CHART_COLORS[allCats.indexOf(c) % CHART_COLORS.length];
+    if (catChartMode === "type") { renderStackedChart(box, legend, selected, allCats, len, labelOf, colorOf); return; }
     for (const c of cats) {
       const item = el("span", "legend-item");
       const sw = el("i", "sw box");
@@ -1174,6 +1262,11 @@
       $("tabSummary").hidden = b.dataset.tab !== "summary";
       $("tabChart").hidden = b.dataset.tab !== "chart";
     }));
+    document.querySelectorAll("[data-cmode]").forEach((b) => b.addEventListener("click", () => {
+      catChartMode = b.dataset.cmode;
+      render();
+    }));
+
     $("moreBtn").addEventListener("click", () => { shown += PAGE; render(); });
     $("list").addEventListener("click", (e) => {
       const row = e.target.closest(".tx");

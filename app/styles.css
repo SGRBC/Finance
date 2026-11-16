@@ -223,3 +223,7 @@ body.locked main, body.locked .fab { display: none !important; }
 .chart-svg text.val.pos { fill: var(--credit); }
 .chart-svg text.val.neg { fill: var(--debit); }
 .filters select:disabled { opacity: .5; cursor: not-allowed; }
+.chart-svg text.seg-val { font-size: 10px; font-weight: 600; fill: #fff; pointer-events: none; }
+.chart-svg text.pos { fill: var(--credit); }
+.chart-svg text.neg { fill: var(--debit); }
+#tabChart > .seg { margin-bottom: 8px; }
