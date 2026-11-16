@@ -485,7 +485,9 @@
 
     const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     const cSel = $("fCategory");
-    cSel.replaceChildren(new Option("All categories", ""), ...cats.map((c) => new Option(c, c)));
+    // Label each category with its type, as in the Summary tab. A category used for both types (e.g. Others) shows both.
+    const typeLabel = (c) => [state.categories.Credit.includes(c) && "Credit", state.categories.Debit.includes(c) && "Debit"].filter(Boolean).join("/");
+    cSel.replaceChildren(new Option("All categories", ""), ...cats.map((c) => new Option(`${c} (${typeLabel(c)})`, c)));
     cSel.value = cats.includes(filters.category) ? filters.category : "";
     filters.category = cSel.value;
   };
