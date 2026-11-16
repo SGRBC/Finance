@@ -58,7 +58,7 @@ main { max-width: 820px; margin: 0 auto; padding: 12px 12px 0; }
 .filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.3fr); gap: 8px; margin-bottom: 12px; }
 .filters .search-wrap, .filters .seg { grid-column: 1 / -1; }
 .filters select { padding-left: 8px; padding-right: 4px; text-overflow: ellipsis; }
-select, input[type=search], input[type=text], input[type=number], input[type=datetime-local] {
+select, input[type=search], input[type=text], input[type=number], input[type=datetime-local], input[type=date] {
   width: 100%; padding: 10px 12px; min-height: 44px;
   background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
 }
@@ -227,3 +227,6 @@ body.locked main, body.locked .fab { display: none !important; }
 .chart-svg text.pos { fill: var(--credit); }
 .chart-svg text.neg { fill: var(--debit); }
 #tabChart > .seg { margin-bottom: 8px; }
+.chart-svg rect.bar { cursor: pointer; }
+.range-row { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin-bottom: 8px; }
+.range-row label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 140px; font-size: 12px; color: var(--muted); }

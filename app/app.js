@@ -626,7 +626,8 @@
       return {
         v: running, day: v,
         x: daily ? Date.UTC(y, m - 1, d) / 86400000 : y * 12 + m - 1,
-        label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${Number(lastDay.get(k))} '${String(y).slice(2)}`,
+        label: daily ? `${MONTHS[m - 1]} ${d}` : `${MONTHS[m - 1]} ${Number(lastDay.get(k))}`,
+        year: daily ? "" : String(y),   // multi-month view: the year is written under the month label
       };
     });
   };
@@ -641,6 +642,7 @@
     return Math.max(600, Math.ceil((labelW * (u[u.length - 1] - u[0])) / minD + labelW + 8 + sides));
   };
 
+  const chartRange = { from: "", to: "" };   // "YYYY-MM-DD" bounds (inclusive) for the running net balance chart; "" = open-ended
   const renderChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
@@ -662,7 +664,12 @@
     legend.replaceChildren();
     if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
-    const pts = chartPoints(list, list.filter((t) => !chartOff.has(t.category)));
+    // Optional date range for this chart only: the balance starts at zero on the first day inside the range.
+    const ranged = list.filter((t) => (!chartRange.from || t.date.slice(0, 10) >= chartRange.from) && (!chartRange.to || t.date.slice(0, 10) <= chartRange.to));
+    $("chartRangeClear").hidden = !chartRange.from && !chartRange.to;
+    if (!ranged.length) { box.append(el("p", "empty", "No transactions in this date range.")); return; }
+
+    const pts = chartPoints(ranged, ranged.filter((t) => !chartOff.has(t.category)));
     const on = allCats.length - chartOff.size;
     const item = el("span", "legend-item");
     item.append(el("i", "sw ln-net"), document.createTextNode(`Running net balance (credits − debits) · ${on} of ${allCats.length} categories`));
@@ -671,7 +678,8 @@
 
     const vals = pts.map((p) => p.v);
     const labelW = Math.max(56, ...vals.map((v) => amountFmt.format(v).length * 5.6 + 8));
-    const H = 300, L = 50, R = 16, T = 12, B = 30;
+    const hasYear = pts.some((p) => p.year);
+    const H = 300, L = 50, R = 16, T = 12, B = hasYear ? 44 : 30;
     const W = chartWidth(pts.map((p) => p.x), labelW, L + R);   // wide enough for every amount to be written without overlap
     const pw = W - L - R, ph = H - T - B;
     const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
@@ -684,7 +692,7 @@
     const Y = (v) => T + ph - ((v - yMin) / (yMax - yMin)) * ph;
 
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Line chart of running net balance (credits minus debits)" }, "chart-svg");
-    if (W > 600) svg.style.width = `${W}px`;
+    if (W > 600) svg.style.minWidth = `${W}px`;   // never narrower than needed (scrolls), but stretches to fill a wider screen
     for (let v = yMin; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, Math.abs(v) < step / 1000 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
@@ -693,15 +701,20 @@
     }
     // Date labels sit under every point.
     for (const p of pts) {
-      const t = svgEl("text", { x: X(p), y: H - 10, "text-anchor": "middle" });
+      const t = svgEl("text", { x: X(p), y: hasYear ? H - 24 : H - 10, "text-anchor": "middle" });
       t.textContent = p.label;
       svg.append(t);
+      if (p.year) {
+        const yt = svgEl("text", { x: X(p), y: H - 9, "text-anchor": "middle" });
+        yt.textContent = p.year;
+        svg.append(yt);
+      }
     }
     svg.append(svgEl("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${X(p).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(" ") }, "ln ln-net"));
     for (const p of pts) {
       const dot = svgEl("circle", { cx: X(p), cy: Y(p.v), r: n > 60 ? 2.5 : 4 }, `dot ${p.v >= 0 ? "ln-credit" : "ln-debit"}`);
       const tip = svgEl("title");
-      tip.textContent = `${p.label}: balance ${fmt.format(p.v)} (day net ${fmt.format(p.day)})`;
+      tip.textContent = `${p.label}${p.year ? ` ${p.year}` : ""}: balance ${fmt.format(p.v)} (day net ${fmt.format(p.day)})`;
       dot.append(tip);
       svg.append(dot);
     }
@@ -720,6 +733,22 @@
   //  - "type": one Credit bar and one Debit bar per day/month, each stacked by category.
   // A category with no entries in a period has no bar/segment there.
   let catChartMode = "type";
+  // Clicking a bar jumps to the Transactions tab filtered to that bar's year, month (not when the bar is a single day,
+  // which has no day filter), category and, for the stacked view, Credit/Debit.
+  const drillDown = (period, category, type) => {
+    filters.year = period.slice(0, 4);
+    filters.month = period.slice(5, 7);
+    filters.category = category;
+    filters.type = type;
+    filters.search = "";
+    shown = PAGE;
+    $("fSearch").value = "";
+    $("fSearchClear").hidden = true;
+    document.querySelectorAll("[data-type]").forEach((x) => x.classList.toggle("active", x.dataset.type === type));
+    fullRender();
+    document.querySelector('[data-tab="list"]').click();
+    window.scrollTo({ top: 0 });
+  };
   const renderStackedChart = (box, legend, selected, allCats, len, labelOf, colorOf) => {
     const tot = new Map();   // period -> { Credit: Map(category -> amount), Debit: Map(category -> amount) }
     for (const t of selected) {
@@ -758,7 +787,7 @@
     const Y = (v) => T + ph - (v / yMax) * ph;
 
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Stacked bar chart of total credit and total debit per period, split by category" }, "chart-svg");
-    if (W > 600) svg.style.width = `${W}px`;
+    if (W > 600) svg.style.minWidth = `${W}px`;   // never narrower than needed (scrolls), but stretches to fill a wider screen
     for (let v = 0; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, v === 0 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
@@ -786,6 +815,7 @@
           const tip = svgEl("title");
           tip.textContent = `${type} · ${c} · ${labelOf(k)}: ${fmt.format(v)} (total ${fmt.format(total)})`;
           seg.append(tip);
+          seg.addEventListener("click", () => drillDown(k, c, type));
           svg.append(seg);
           if (yBot - yTop >= 13) {
             const st = svgEl("text", { x: x + BAR / 2, y: (yTop + yBot) / 2 + 3.5, "text-anchor": "middle" }, "seg-val");
@@ -855,7 +885,7 @@
     const Y = (v) => T + ph - (v / yMax) * ph;
 
     const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Bar chart of the amount per category over time" }, "chart-svg");
-    if (W > 600) svg.style.width = `${W}px`;
+    if (W > 600) svg.style.minWidth = `${W}px`;   // never narrower than needed (scrolls), but stretches to fill a wider screen
     for (let v = 0; v <= yMax + step / 1000; v += step) {
       svg.append(svgEl("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v) }, v === 0 ? "grid zero" : "grid"));
       const t = svgEl("text", { x: L - 6, y: Y(v) + 4, "text-anchor": "end" });
@@ -876,6 +906,7 @@
         const tip = svgEl("title");
         tip.textContent = `${c} · ${labelOf(k)}: ${fmt.format(v)}`;
         bar.append(tip);
+        bar.addEventListener("click", () => drillDown(k, c, ""));
         svg.append(bar);
         const txt = svgEl("text", { x: x + BAR / 2, y: Y(v) - 5, "text-anchor": "middle" }, "val");
         txt.style.fill = colorOf(c);
@@ -1262,6 +1293,18 @@
       $("tabSummary").hidden = b.dataset.tab !== "summary";
       $("tabChart").hidden = b.dataset.tab !== "chart";
     }));
+    const onRange = () => {
+      chartRange.from = $("chartFrom").value;
+      chartRange.to = $("chartTo").value;
+      if (chartRange.from && chartRange.to && chartRange.from > chartRange.to) {   // keep the range valid: the edited end wins
+        if (document.activeElement === $("chartFrom")) $("chartTo").value = chartRange.to = chartRange.from;
+        else $("chartFrom").value = chartRange.from = chartRange.to;
+      }
+      renderChart(filtered());
+    };
+    $("chartFrom").addEventListener("change", onRange);
+    $("chartTo").addEventListener("change", onRange);
+    $("chartRangeClear").addEventListener("click", () => { $("chartFrom").value = ""; $("chartTo").value = ""; onRange(); });
     document.querySelectorAll("[data-cmode]").forEach((b) => b.addEventListener("click", () => {
       catChartMode = b.dataset.cmode;
       render();
