@@ -21,19 +21,22 @@
       <img src="icons/logo.png" class="logo" alt="SGRBC logo" width="36" height="36">
       <h1>SGRBC Finance</h1>
     </div>
+    <span id="apiStatus" class="api-status" role="status" aria-live="polite" hidden><i class="spinner" aria-hidden="true"></i><span id="apiStatusText"></span></span>
     <span id="who" class="who" hidden></span>
     <button id="menuBtn" class="icon-btn" aria-label="Menu" aria-haspopup="true">&#8942;</button>
     <div id="menu" class="menu" hidden>
-      <button id="menuInstall" hidden>Install app</button>
-      <button id="menuSignIn" hidden>Sign in with Google</button>
-      <button id="menuSignOut" hidden>Sign out</button>
-      <button id="menuRefresh" hidden>Refresh from Google Drive</button>
-      <button id="menuShare" hidden>Share &amp; access…</button>
-      <button id="menuLink" hidden>Copy link for other devices</button>
-      <button id="exportCsv">Export CSV</button>
-      <button id="exportJson">Backup (JSON)</button>
-      <button id="importJson">Restore from backup</button>
-      <button id="resetSeed" class="danger">Reset to original spreadsheet data</button>
+      <div class="menu-group">
+        <button id="exportCsv">Export CSV</button>
+        <button id="menuLink" hidden>Copy link for other devices</button>
+        <button id="menuShare" hidden>Share &amp; access…</button>
+      </div>
+      <div class="menu-group">
+        <button id="exportJson">Backup (JSON)</button>
+        <button id="importJson">Restore from backup</button>
+        <button id="menuRefresh" hidden>Refresh from Google Drive</button>
+        <button id="menuSignIn" hidden>Sign in with Google</button>
+        <button id="menuSignOut" hidden>Sign out</button>
+      </div>
     </div>
     <input id="importFile" type="file" accept="application/json,.json" hidden>
   </header>
@@ -154,16 +157,6 @@
         <button type="submit" id="saveBtn" class="primary">Save</button>
       </div>
     </form>
-  </dialog>
-
-  <dialog id="installDlg">
-    <h2>Install SGRBC Finance</h2>
-    <p id="installIntro" class="hint"></p>
-    <ol id="installSteps" class="install-steps"></ol>
-    <div class="actions">
-      <span class="spacer"></span>
-      <button type="button" id="installClose" class="primary">Got it</button>
-    </div>
   </dialog>
 
   <dialog id="linkDlg">

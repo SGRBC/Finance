@@ -2,13 +2,13 @@
 
 An installable web app (PWA) for tracking incoming credits and outgoing debits. One codebase runs on desktop browsers, Android and iPhone.
 
-Starting data comes from `SGRBC Finance Cash Flow.xlsx` (468 transactions, categories from the *Category* sheet).
+The app ships with no data. All data lives in the Google Drive file (or, in local-only mode, in the browser).
 
 ## Features
 - Add / edit / delete credits and debits (amount, category, date-time, description)
 - Filter by month, category, type, text search; running Credits / Debits / Balance totals
 - Summary tab: totals per category and per month
-- Export CSV, JSON backup / restore, reset to original spreadsheet data
+- Export CSV, JSON backup / restore
 - **Shared data file in Google Drive** that every device reads (auto-refreshes every minute)
 - **Google sign-in for editing; everyone else is view-only**
 - Light/dark mode, touch friendly, works offline (shows last downloaded copy)
@@ -64,9 +64,8 @@ Host over HTTPS, open the URL, then:
 ## Good to know
 - Concurrent edits: each save re-downloads the latest file, applies just your change, then uploads, so two editors adding different entries do not overwrite each other (only edits made within the same second or so can still collide, last write wins).
 - Drive keeps version history for the file (right-click the file in Drive → *Manage versions*), which is your safety net against mistakes.
-- The attachment image paths from the spreadsheet are not included.
 - Tokens are held in memory only (never saved to disk); signing out revokes them.
 - When you change any app file, bump `CACHE` in `app/sw.js`.
 
 ## Developer tools
-`tools/build-seed.mjs` converts a text dump of the workbook into `app/seed.json`; `tools/make-icons.mjs` regenerates icons; `tools/serve.mjs` is a local test server that refuses to bind to all interfaces.
+`tools/make-icons.mjs` regenerates icons; `tools/serve.mjs` is a local test server that refuses to bind to all interfaces.

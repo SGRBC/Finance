@@ -9,10 +9,6 @@
   const CACHE_KEY = "sgrbc-finance-cache-v1";    // last copy downloaded from Google Drive (for fast/offline viewing)
   const FILE_KEY = "sgrbc-finance-file-id";
   const PAGE = 50;
-  const DEBIT_CATEGORIES = ["Pastoral Colabor", "Benevolence", "Utilities", "Recurring", "Special", "Renovation"];
-  // Retired categories: old entries keep them (and still count in the totals), but they are not offered in the Category filter or the chart options.
-  const HIDDEN_CATEGORIES = new Set(["Custodian", "Honorarium", "Representation"]);
-  const listedCategory = (c) => !HIDDEN_CATEGORIES.has(c);
   const MAX_BYTES = 20 * 1024 * 1024;
   const MAX_ATTACH = 150000;                      // max length of one stored attachment (data URL characters, ~110 KB)
   const MAX_PHOTO_FILE = 25 * 1024 * 1024;        // largest original image we will try to read
@@ -70,6 +66,24 @@
     document.head.append(s);
   }));
 
+  // ---------- Google activity status (shown in the header) ----------
+  // Every wait on Google runs through working(label, fn). While anything is running the header shows a spinner and the label
+  // of the oldest running task (the outermost step), so a nested call never replaces the more meaningful message.
+  const activity = [];
+  const renderStatus = () => {
+    const box = $("apiStatus");
+    if (!box) return;
+    box.hidden = !activity.length;
+    if (activity.length) $("apiStatusText").textContent = activity[0].label;
+  };
+  const working = async (label, fn) => {
+    const item = { label };
+    activity.push(item);
+    renderStatus();
+    try { return await fn(); }
+    finally { activity.splice(activity.indexOf(item), 1); renderStatus(); }
+  };
+
   // ---------- validation (also applied to imported / downloaded data) ----------
   const validAttachment = (s) =>
     typeof s === "string" && s.length <= MAX_ATTACH && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/.test(s);
@@ -86,10 +100,11 @@
 
   const sanitize = (data) => {
     if (!data || typeof data !== "object" || !Array.isArray(data.transactions)) throw new Error("bad format");
-    const cats = { Credit: [], Debit: DEBIT_CATEGORIES.slice() };
-    {
-      const src = data.categories && Array.isArray(data.categories.Credit) ? data.categories.Credit : [];
-      for (const c of src) if (typeof c === "string" && c && c.length <= 60 && !cats.Credit.includes(c)) cats.Credit.push(c);
+    // Categories come only from the data itself (its category lists plus every category used by a transaction).
+    const cats = { Credit: [], Debit: [] };
+    for (const type of ["Credit", "Debit"]) {
+      const src = data.categories && Array.isArray(data.categories[type]) ? data.categories[type] : [];
+      for (const c of src) if (typeof c === "string" && c && c.length <= 60 && !cats[type].includes(c)) cats[type].push(c);
     }
     const seen = new Set();
     const txs = [];
@@ -115,12 +130,6 @@
     try { const raw = localStorage.getItem(key); return raw ? sanitize(JSON.parse(raw)) : null; }
     catch { return null; }
   };
-  const loadSeed = async () => {
-    const res = await fetch("seed.json", { cache: "no-cache" });
-    if (!res.ok) throw new Error("seed unavailable");
-    return sanitize(await res.json());
-  };
-
   // ---------- Google auth ----------
   let tokenClient = null;
   let waiter = null;
@@ -140,7 +149,7 @@
       error_callback: () => { const w = waiter; waiter = null; if (w) w.reject(new Error("auth")); },
     });
   };
-  const authReady = (async () => { if (driveMode) { try { await initAuth(); } catch { /* shown on sign-in */ } } })();
+  const authReady = (async () => { if (driveMode) { try { await working("Loading Google sign-in…", initAuth); } catch { /* shown on sign-in */ } } })();
 
   // Installed app (home-screen PWA): the Google popup cannot report back from the Custom Tab Android opens, so sign-in
   // uses a full-page redirect instead (see signInRedirect / takeRedirectToken). Silent re-auth is not possible there.
@@ -156,6 +165,8 @@
       state: st, include_granted_scopes: "true", prompt: "select_account",
     });
     if (session.email) p.set("login_hint", session.email);
+    activity.push({ label: "Redirecting to Google sign-in…" });   // the page is about to leave, so this is never cleared
+    renderStatus();
     location.assign(`https://accounts.google.com/o/oauth2/v2/auth?${p}`);
   };
   // Reads the token Google put in the URL fragment after the redirect. Returns true when a token was accepted.
@@ -178,34 +189,34 @@
     if (isInstalled()) throw new Error("auth");
     await authReady;
     if (!tokenClient) throw new Error("auth");
-    return new Promise((resolve, reject) => {
+    return working("Waiting for Google sign-in…", () => new Promise((resolve, reject) => {
       waiter = { resolve, reject };
       tokenClient.requestAccessToken({ prompt: session.email ? "" : "select_account", login_hint: session.email || undefined });
-    });
+    }));
   };
 
   // Drive REST call with a 20 s timeout. Always uses the signed-in user's token (no anonymous access).
-  const api = async (url, opts = {}) => {
+  const api = (url, opts = {}) => working("Contacting Google Drive…", async () => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 20000);
     const headers = { ...(opts.headers || {}) };
     if (hasToken()) headers.Authorization = `Bearer ${session.token}`;
     try { return await fetch(url, { ...opts, headers, signal: ctl.signal, cache: "no-store" }); }
     finally { clearTimeout(timer); }
-  };
+  });
   const readJson = async (res) => {
     const text = await res.text();
     if (text.length > MAX_BYTES) throw new Error("too large");
     return JSON.parse(text);
   };
 
-  const fetchUser = async () => {
+  const fetchUser = () => working("Getting your Google account…", async () => {
     const res = await api(`${DRIVE}/about?fields=user(emailAddress,displayName)`);
     if (!res.ok) throw new Error("user");
     const u = (await readJson(res)).user || {};
     session.email = typeof u.emailAddress === "string" ? u.emailAddress : "";
     session.name = typeof u.displayName === "string" ? u.displayName : "";
-  };
+  });
 
   // ---------- Drive data file ----------
   const setFileId = (id) => {
@@ -246,7 +257,7 @@
   const clearData = () => { state = { categories: { Credit: [], Debit: [] }, transactions: [] }; };
 
   // Data is only fetched and shown when the user is signed in and Google confirms access to the shared file.
-  const refresh = async (manual) => {
+  const refreshNow = async (manual) => {
     if (!driveMode) return;
     role = "viewer";
     if (!drive.fileId) { drive.status = "nofile"; clearData(); fullRender(); updateUi(); return; }
@@ -261,10 +272,11 @@
     updateUi();
     if (manual) toast(drive.status === "ok" ? "Up to date" : "Could not refresh");
   };
+  const refresh = (manual) => working("Loading data from Google Drive…", () => refreshNow(manual));
 
   // Every change: download latest -> apply change -> upload. Google Drive rejects the upload unless the signed-in
   // account really has edit rights, so this cannot be bypassed by editing the page.
-  const mutate = async (fn) => {
+  const mutateNow = async (fn) => {
     if (!driveMode) { state = sanitize(fn(state)); saveLocal(); return true; }
     if (!canEdit()) { toast("View only: you do not have edit access."); return false; }
     try {
@@ -284,6 +296,7 @@
       return false;
     }
   };
+  const mutate = (fn) => (driveMode ? working("Saving to Google Drive…", () => mutateNow(fn)) : mutateNow(fn));
 
 
   // Accepts a Drive link (…/d/ID/…, …?id=ID) or a bare file ID.
@@ -321,8 +334,10 @@
   const pickFile = async () => {
     try {
       const token = await getToken();
-      await loadScript("https://apis.google.com/js/api.js");
-      await new Promise((resolve) => gapi.load("picker", { callback: resolve }));
+      await working("Loading Google file picker…", async () => {
+        await loadScript("https://apis.google.com/js/api.js");
+        await new Promise((resolve) => gapi.load("picker", { callback: resolve }));
+      });
       const view = new google.picker.DocsView(google.picker.ViewId.DOCS).setIncludeFolders(false).setMimeTypes("application/json");
       if (drive.fileId) view.setFileIds(drive.fileId);
       const builder = new google.picker.PickerBuilder()
@@ -369,7 +384,7 @@
     box.replaceChildren(el("p", "hint", "Loading…"));
     try {
       await getToken();
-      const res = await api(permUrl("?pageSize=100&fields=permissions(id,type,role,emailAddress,displayName)"));
+      const res = await working("Loading the access list…", () => api(permUrl("?pageSize=100&fields=permissions(id,type,role,emailAddress,displayName)")));
       if (!res.ok) throw new Error("perm");
       const perms = (await readJson(res)).permissions || [];
       box.replaceChildren();
@@ -483,10 +498,9 @@
     mSel.replaceChildren(new Option("All months", ""), ...MONTHS.map((m, i) => new Option(m, String(i + 1).padStart(2, "0"))));
     syncMonthSelect();
 
-    // Offering and Others (the credit categories) are pinned to the top of the dropdown; the rest stay alphabetical.
-    const PINNED = ["Offering", "Others"];
-    const rank = (c) => (PINNED.includes(c) ? PINNED.indexOf(c) : PINNED.length);
-    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    // Credit categories are listed first, then the rest; each part is alphabetical.
+    const rank = (c) => (state.categories.Credit.includes(c) ? 0 : 1);
+    const cats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     const cSel = $("fCategory");
     // Label each category with its type, as in the Summary tab. A category used for both types (e.g. Others) shows both.
     const typeLabel = (c) => [state.categories.Credit.includes(c) && "Credit", state.categories.Debit.includes(c) && "Debit"].filter(Boolean).join("/");
@@ -579,8 +593,11 @@
       running += net;
       return { m, e, net, running };
     });
+    let prevYear = "";
     for (const r of rowsAsc.reverse()) {
       const tr = el("tr");
+      if (prevYear && r.m.slice(0, 4) !== prevYear) tr.className = "year-start";   // thick line where the year changes
+      prevYear = r.m.slice(0, 4);
       tr.append(
         el("td", "", monthLabel(r.m)), el("td", "pos", fmt.format(r.e.c)), el("td", "neg", fmt.format(r.e.d)),
         el("td", r.net >= 0 ? "pos" : "neg", fmt.format(r.net)),
@@ -661,7 +678,7 @@
     return { source, opening };
   };
   const renderChart = (list) => {
-    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
+    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
     for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
     const chips = $("chartCats");
     chips.replaceChildren();
@@ -850,7 +867,7 @@
     box.append(svg);
   };
   const renderCategoryChart = (list) => {
-    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
+    const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].sort();
     const box = $("chartByCat");
     const legend = $("chartByCatLegend");
     box.replaceChildren();
@@ -965,7 +982,6 @@
     document.body.classList.toggle("locked", driveMode && drive.status !== "ok");   // hide all data until access is confirmed
     $("addBtn").hidden = !canEdit();
     $("importJson").hidden = !canEdit();
-    $("resetSeed").hidden = !canEdit();
     $("menuSignIn").hidden = !driveMode || signed;
     $("menuSignOut").hidden = !driveMode || !signed;
     $("menuRefresh").hidden = !driveMode || !drive.fileId;
@@ -1000,8 +1016,7 @@
   };
 
   // ---------- add / edit dialog ----------
-  // Debit entries may only use DEBIT_CATEGORIES. An older entry with a retired category must be re-categorised before saving.
-  const formCategories = (type) => (type === "Debit" ? DEBIT_CATEGORIES : state.categories[type]);
+  const formCategories = (type) => state.categories[type];
   const fillCategoryOptions = (selected) => {
     const sel = $("fCat");
     const list = formCategories(formType);
@@ -1214,76 +1229,9 @@
     if (!confirm(`Replace current data with ${data.transactions.length} transactions from this backup?`)) return;
     if (await mutate(() => data)) { fullRender(); toast("Backup restored"); }
   };
-  const resetSeed = async () => {
-    if (!canEdit() || !confirm("Replace ALL data with the original spreadsheet data? Entries added since then will be lost.")) return;
-    let seed;
-    try { seed = await loadSeed(); } catch { toast("Could not load original data."); return; }
-    if (await mutate(() => seed)) { fullRender(); toast("Original data restored"); }
-  };
-
-  // ---------- install as an app (PWA) ----------
-  // Chrome/Edge (PC + Android) give us a native install prompt; Safari/iPhone and Firefox need manual steps.
-  let installEvent = null;
+  // True when running as an installed app (home-screen / standalone window); sign-in then uses the redirect flow.
   const isInstalled = () =>
     window.matchMedia("(display-mode: standalone)").matches || window.matchMedia("(display-mode: window-controls-overlay)").matches || navigator.standalone === true;
-  const platform = () => {
-    const ua = navigator.userAgent || "";
-    const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    const android = /Android/.test(ua);
-    const firefox = /Firefox|FxiOS/.test(ua);
-    const edge = /Edg|EdgA|EdgiOS/.test(ua);
-    const safari = /Safari/.test(ua) && !/Chrome|CriOS|FxiOS|Edg|EdgA|EdgiOS|OPR/.test(ua);
-    return { ios, android, firefox, edge, safari };
-  };
-  const updateInstallUi = () => { $("menuInstall").hidden = isInstalled(); };
-
-  const installHelp = () => {
-    const p = platform();
-    let intro = "";
-    let steps = [];
-    if (p.ios) {
-      intro = p.safari ? "On iPhone and iPad, installing is done from the Share menu." : "On iPhone and iPad, installing is done from the Share menu. If you do not see the option below, open this page in Safari.";
-      steps = ["Tap the Share button (a square with an arrow pointing up) in the browser toolbar.", "Scroll down and tap “Add to Home Screen”.", "Tap “Add”. The SGRBC Finance icon now appears on your home screen."];
-    } else if (p.android && p.firefox) {
-      intro = "Firefox on Android can install this app from its menu.";
-      steps = ["Tap the menu (⋮) in Firefox.", "Tap “... More”.", "Tap “Add app to Home screen”.", "Confirm with “Add”. The icon appears on your home screen."];
-    } else if (p.android) {
-      intro = "Your browser did not offer the install prompt automatically, but you can still install from its menu.";
-      steps = ["Tap the menu (⋮) in the top-right corner.", "Tap “Install app” (or “Add to Home screen”).", "Confirm with “Install”. The icon appears on your home screen."];
-    } else if (p.firefox) {
-      intro = "Firefox on a computer cannot install web apps.";
-      steps = ["Open this same address in Google Chrome or Microsoft Edge.", "Click the install icon at the right end of the address bar, or open the menu and choose “Install SGRBC Finance”.", "Or keep using it in Firefox and bookmark the page (Ctrl+D)."];
-    } else if (p.edge) {
-      intro = "Microsoft Edge can install this site as an app.";
-      steps = ["Click the menu (…) at the top right of Edge.", "Choose “Apps”, then “Install this site as an app”.", "Click “Install”. You can pin it to the taskbar or Start."];
-    } else if (p.safari) {
-      intro = "Safari on a Mac can add this site to the Dock.";
-      steps = ["In the menu bar choose File, then “Add to Dock…”.", "Click “Add”."];
-    } else {
-      intro = "Google Chrome can install this site as an app.";
-      steps = ["Click the install icon at the right end of the address bar.", "If you do not see it, open the menu (⋮) and choose “Cast, save and share”, then “Install page as app”.", "Click “Install”."];
-    }
-    $("installIntro").textContent = intro;
-    $("installSteps").replaceChildren(...steps.map((s) => el("li", "", s)));
-    $("installDlg").showModal();
-  };
-
-  const installApp = async () => {
-    if (installEvent) {
-      const ev = installEvent;
-      installEvent = null;
-      try {
-        await ev.prompt();
-        const choice = await ev.userChoice;
-        if (choice && choice.outcome === "accepted") toast("Installing…");
-      } catch { installHelp(); }
-      return;
-    }
-    installHelp();
-  };
-
-  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installEvent = e; updateInstallUi(); });
-  window.addEventListener("appinstalled", () => { installEvent = null; updateInstallUi(); toast("App installed"); });
 
   // ---------- wiring ----------
   const wire = () => {
@@ -1357,14 +1305,10 @@
     const menu = $("menu");
     $("menuBtn").addEventListener("click", (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
     document.addEventListener("click", () => (menu.hidden = true));
-    $("menuInstall").addEventListener("click", installApp);
-    $("installClose").addEventListener("click", () => $("installDlg").close());
-    updateInstallUi();
     $("exportCsv").addEventListener("click", exportCsv);
     $("exportJson").addEventListener("click", exportJson);
     $("importJson").addEventListener("click", () => $("importFile").click());
     $("importFile").addEventListener("change", (e) => { importJson(e.target.files[0]); e.target.value = ""; });
-    $("resetSeed").addEventListener("click", resetSeed);
 
     $("menuSignIn").addEventListener("click", signIn);
     $("menuSignOut").addEventListener("click", signOut);
@@ -1384,9 +1328,6 @@
     wire();
     if (!driveMode) {
       state = readLocal(LOCAL_KEY) || state;
-      if (!state.transactions.length) {
-        try { state = await loadSeed(); saveLocal(); } catch { toast("Could not load starting data."); }
-      }
       fullRender(); updateUi();
       return;
     }
