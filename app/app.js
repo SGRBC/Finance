@@ -719,7 +719,7 @@
   //  - "category": grouped bars, one group per day/month, one bar per category.
   //  - "type": one Credit bar and one Debit bar per day/month, each stacked by category.
   // A category with no entries in a period has no bar/segment there.
-  let catChartMode = "category";
+  let catChartMode = "type";
   const renderStackedChart = (box, legend, selected, allCats, len, labelOf, colorOf) => {
     const tot = new Map();   // period -> { Credit: Map(category -> amount), Debit: Map(category -> amount) }
     for (const t of selected) {
