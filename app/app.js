@@ -647,7 +647,19 @@
     return Math.max(600, Math.ceil((labelW * (u[u.length - 1] - u[0])) / minD + labelW + 8 + sides));
   };
 
-  const chartRange = { from: "", to: "" };   // "YYYY-MM-DD" bounds (inclusive) for the running net balance chart; "" = open-ended
+  const chartRange = { from: "", to: "" };   // "YYYY-MM-DD" bounds (inclusive) shared by both charts; "" = open-ended
+  // The transactions the charts draw. With a date range the Year/Month filters are ignored (as if all years and all months
+  // were selected); `opening` is the net balance of everything before the range, so the running balance stays true.
+  const chartSource = (list) => {
+    if (!chartRange.from && !chartRange.to) return { source: list, opening: 0 };
+    const all = filtered(true);
+    const day = (t) => t.date.slice(0, 10);
+    const opening = all
+      .filter((t) => chartRange.from && day(t) < chartRange.from && !chartOff.has(t.category))
+      .reduce((s, t) => s + (t.type === "Credit" ? t.amount : -t.amount), 0);
+    const source = all.filter((t) => (!chartRange.from || day(t) >= chartRange.from) && (!chartRange.to || day(t) <= chartRange.to));
+    return { source, opening };
+  };
   const renderChart = (list) => {
     const allCats = [...new Set([...state.categories.Credit, ...state.categories.Debit])].filter(listedCategory).sort();
     for (const c of [...chartOff]) if (!allCats.includes(c)) chartOff.delete(c);
@@ -669,19 +681,11 @@
     legend.replaceChildren();
     if (!list.length && !chartRange.from && !chartRange.to) { box.append(el("p", "empty", "No data for this selection.")); return; }
 
-    // Optional date range for this chart only. With a range the Year/Month filters are ignored (as if all years and all
-    // months were selected): the balance is the true running balance, i.e. it starts from everything before the range, and
-    // only the points inside the range are drawn.
-    const hasRange = Boolean(chartRange.from || chartRange.to);
-    $("chartRangeClear").hidden = !hasRange;
-    let source = list, opening = 0;
-    if (hasRange) {
-      source = filtered(true);
-      const before = source.filter((t) => chartRange.from && t.date.slice(0, 10) < chartRange.from && !chartOff.has(t.category));
-      opening = before.reduce((s, t) => s + (t.type === "Credit" ? t.amount : -t.amount), 0);
-      source = source.filter((t) => (!chartRange.from || t.date.slice(0, 10) >= chartRange.from) && (!chartRange.to || t.date.slice(0, 10) <= chartRange.to));
-      if (!source.length) { box.append(el("p", "empty", "No transactions in this date range.")); return; }
-    }
+    // Optional date range (shared with the Amount per category chart): the balance starts from everything before the
+    // range, and only the points inside the range are drawn.
+    $("chartRangeClear").hidden = !chartRange.from && !chartRange.to;
+    const { source, opening } = chartSource(list);
+    if (!source.length) { box.append(el("p", "empty", "No transactions in this date range.")); return; }
 
     const pts = chartPoints(source, source.filter((t) => !chartOff.has(t.category)), opening);
     const on = allCats.length - chartOff.size;
@@ -852,11 +856,12 @@
     box.replaceChildren();
     legend.replaceChildren();
     document.querySelectorAll("[data-cmode]").forEach((b) => b.classList.toggle("active", b.dataset.cmode === catChartMode));
-    if (!list.length) { box.append(el("p", "empty", "No data for this selection.")); return; }
+    const { source } = chartSource(list);   // follows the date range set above the Running net balance chart
+    if (!source.length) { box.append(el("p", "empty", chartRange.from || chartRange.to ? "No transactions in this date range." : "No data for this selection.")); return; }
 
-    const daily = new Set(list.map((t) => t.date.slice(0, 7))).size <= 1;
+    const daily = new Set(source.map((t) => t.date.slice(0, 7))).size <= 1;
     const len = daily ? 10 : 7;
-    const selected = list.filter((t) => !chartOff.has(t.category));
+    const selected = source.filter((t) => !chartOff.has(t.category));
     const byCat = new Map();   // category -> Map(period -> amount)
     const periods = new Set();
     for (const t of selected) {
@@ -1315,6 +1320,7 @@
         else $("chartFrom").value = chartRange.from = chartRange.to;
       }
       renderChart(filtered());
+      renderCategoryChart(filtered());
     };
     $("chartFrom").addEventListener("change", onRange);
     $("chartTo").addEventListener("change", onRange);
