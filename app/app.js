@@ -1303,6 +1303,7 @@
     });
     document.querySelectorAll("[data-type]").forEach((b) => b.addEventListener("click", () => {
       filters.type = b.dataset.type; shown = PAGE;
+      if (!filters.type) { filters.category = ""; $("fCategory").value = ""; }   // "All" also resets the category dropdown
       document.querySelectorAll("[data-type]").forEach((x) => x.classList.toggle("active", x === b));
       render();
     }));
